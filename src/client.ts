@@ -13,9 +13,34 @@ import { createRequestBuilder, type RequestBuilder } from './builder'
 export type HeaderValue = string | (() => string | Promise<string>)
 
 export interface RetryOptions {
+  /** Number of *additional* attempts after the first (total attempts = times + 1). */
   times: number
+  /**
+   * Predicate deciding whether a settled `Response` should be retried. When
+   * provided it is authoritative — it fully overrides the default policy (the
+   * framework does not add 5xx/429 on top). Transport/network errors are always
+   * retried regardless of this predicate.
+   */
   when?: (res: Response) => boolean
+  /**
+   * Base delay (ms) applied *between* attempts (never before the first). Default
+   * `0` — immediate retries, the original behavior. See {@link computeRetryDelay}.
+   */
+  delayMs?: number
+  /**
+   * Backoff strategy for the delay. `'fixed'` (default) uses `delayMs` each time;
+   * `'exponential'` uses `delayMs * 2^attemptIndex`. A response's `Retry-After`
+   * header, when present, overrides both (see {@link computeRetryDelay}).
+   */
+  backoff?: 'fixed' | 'exponential'
 }
+
+/**
+ * Default per-request timeout (ms) applied when neither a per-request nor a
+ * factory `timeoutMs` is set, so requests no longer hang forever. A value of
+ * `0` is the escape hatch: it disables the timeout (no `AbortSignal`).
+ */
+export const DEFAULT_TIMEOUT_MS = 30_000
 
 /**
  * The fully-resolved request handed to a {@link ClientOptions.beforeRequest}
@@ -320,10 +345,10 @@ export function createClient(opts: ClientOptions): Client {
         // Allow the hook to redirect the request by reassigning `url`.
         const finalUrl = outgoing.url
 
-        const timeoutMs = requestOpts.timeoutMs ?? defaultTimeoutMs
+        const timeoutMs = requestOpts.timeoutMs ?? defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS
+        // A timeout of 0 disables the signal (escape hatch); otherwise apply it.
         const signal =
-          requestOpts.signal ??
-          (timeoutMs !== undefined ? AbortSignal.timeout(timeoutMs) : undefined)
+          requestOpts.signal ?? (timeoutMs === 0 ? undefined : AbortSignal.timeout(timeoutMs))
 
         const res = await fetch(finalUrl, {
           method,
@@ -335,10 +360,10 @@ export function createClient(opts: ClientOptions): Client {
         return res
       }
 
-      const timeoutMs = requestOpts.timeoutMs ?? defaultTimeoutMs
+      const timeoutMs = requestOpts.timeoutMs ?? defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS
+      // A timeout of 0 disables the signal (escape hatch); otherwise apply it.
       const signal =
-        requestOpts.signal ??
-        (timeoutMs !== undefined ? AbortSignal.timeout(timeoutMs) : undefined)
+        requestOpts.signal ?? (timeoutMs === 0 ? undefined : AbortSignal.timeout(timeoutMs))
 
       const res = await fetch(url, {
         method,

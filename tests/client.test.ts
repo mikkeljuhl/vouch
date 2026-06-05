@@ -143,8 +143,16 @@ describe('createClient', () => {
       expect(init.signal).toBeInstanceOf(AbortSignal)
     })
 
-    test('omits signal when no timeout configured', async () => {
+    test('applies the default timeout signal when none is configured', async () => {
       const client = createClient({ baseUrl: 'https://api.example.com' })
+      await client._request('GET', '/x')
+      const [, init] = fetchMock.mock.calls[0]
+      // A default 30s timeout now applies instead of hanging forever.
+      expect(init.signal).toBeInstanceOf(AbortSignal)
+    })
+
+    test('timeoutMs: 0 disables the signal (escape hatch)', async () => {
+      const client = createClient({ baseUrl: 'https://api.example.com', timeoutMs: 0 })
       await client._request('GET', '/x')
       const [, init] = fetchMock.mock.calls[0]
       expect(init.signal).toBeUndefined()
