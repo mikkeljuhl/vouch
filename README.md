@@ -89,7 +89,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v5
-      - uses: mikkeljuhl/vouch@v1        # this repo provides action.yml at its root
+      - uses: mikkeljuhl/vouch@v0.1.0    # pin a release tag (or @main for latest)
         with:
           typecheck: 'true'              # optional; runs tsc --noEmit first
           # paths: tests                 # optional; default = all discovered tests
@@ -630,6 +630,16 @@ The console-log argument is optional: omit it and the script falls back to the
 JUnit-only behaviour (failures shown by error type). Wire it in CI as shown in
 [Three ways to run → CI](#3-ci-github-actions). The script is repo-local and not
 shipped in the package.
+
+---
+
+## Versioning
+
+Semantic Versioning. The version in `package.json` is the single source of truth —
+the `VERSION` export and `vouch --version` both read it. While on `0.x` the public
+API may change in a minor release; changes are recorded in
+[`CHANGELOG.md`](./CHANGELOG.md). Pin the action/package to a release tag
+(`@v0.1.0`) for stability, or track `@main` for the latest.
 
 ---
 
