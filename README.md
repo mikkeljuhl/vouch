@@ -116,10 +116,13 @@ jobs:
           bun-version: latest
       - run: bun install --frozen-lockfile
       - name: Test
-        run: bun test --reporter=junit --reporter-outfile=reports/junit.xml
+        # tee Bun's console to a log so its full assertion messages can be
+        # merged into the JUnit (Bun's JUnit omits them). `shell: bash` runs
+        # with `set -o pipefail`, so a failed `bun test` still fails the step.
+        run: bun test --reporter=junit --reporter-outfile=reports/junit.xml 2>&1 | tee apitest-console.log
       - name: Job summary + annotations
         if: always()
-        run: bun scripts/ci-summary.mjs reports/junit.xml
+        run: bun scripts/ci-summary.mjs reports/junit.xml apitest-console.log
 ```
 
 No third-party reporting action is needed — `scripts/ci-summary.mjs` parses the
@@ -274,10 +277,14 @@ GET https://api/users/1 — JSON body did not match (subset) (4 differences):
   • profile  missing (expected key not present)
 ```
 
-> **Caveat (Bun JUnit):** Bun's `--reporter=junit` emits a `<failure>` element
-> without the assertion message text — the full `AssertionError` message (the
-> path-level diff) appears in the **run log**, not the XML. The summary script surfaces
-> the per-test failure; check the job log for the detailed message.
+> **Note (Bun JUnit):** Bun's `--reporter=junit` emits a `<failure>` element
+> without the assertion message text — Bun writes the full `AssertionError`
+> message (the path-level diff) only to its **console** output. To recover it,
+> tee the console to a log and pass it to the summary script (see
+> [Reporting](#reporting)); the script merges each message back into the JUnit
+> `<failure>` element (as a `message` attribute + CDATA body) and into the inline
+> annotations and job summary. The enriched JUnit therefore carries the full
+> diff for downstream consumers.
 
 Awaiting a builder resolves to an `ApiResponse<T>`:
 
@@ -419,21 +426,29 @@ await client
 ## Reporting
 
 The framework ships **no third-party reporter action**. It relies on Bun's
-built-in `junit` reporter:
+built-in `junit` reporter, with the console teed to a log so the full assertion
+messages can be recovered (Bun's JUnit omits them):
 
 ```sh
-bun test --reporter=junit --reporter-outfile=reports/junit.xml
+bun test --reporter=junit --reporter-outfile=reports/junit.xml 2>&1 | tee apitest-console.log
+bun scripts/ci-summary.mjs reports/junit.xml apitest-console.log
 ```
 
-The emitted XML is consumed by the repo-local, dependency-free
-[`scripts/ci-summary.mjs`](./scripts/ci-summary.mjs), which parses it into:
+The emitted XML (and the optional console log) are consumed by the repo-local,
+dependency-free [`scripts/ci-summary.mjs`](./scripts/ci-summary.mjs), which:
 
-- **Inline annotations** (GitHub `::error`/`::warning` log commands), and
-- a **`$GITHUB_STEP_SUMMARY`** Markdown table (totals, per-file breakdown,
-  collapsed failure details).
+- merges each failure's full message — parsed from the console log — back into
+  the JUnit `<failure>` elements (as a `message` attribute + CDATA body), so the
+  enriched JUnit is downstream-consumable;
+- prints **inline annotations** (GitHub `::error` log commands) carrying the real
+  diff; and
+- appends a **`$GITHUB_STEP_SUMMARY`** Markdown table (totals, per-file
+  breakdown, collapsed failure details).
 
-Wire it in CI as shown in [Three ways to run → CI](#3-ci-github-actions). The
-script is repo-local and not shipped in the package.
+The console-log argument is optional: omit it and the script falls back to the
+JUnit-only behaviour (failures shown by error type). Wire it in CI as shown in
+[Three ways to run → CI](#3-ci-github-actions). The script is repo-local and not
+shipped in the package.
 
 ---
 

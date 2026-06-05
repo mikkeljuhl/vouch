@@ -47,13 +47,21 @@ runs:
     - name: Test
       shell: bash
       working-directory: ${{ inputs.working-directory }}
-      run: bun test ${{ inputs.paths }} --reporter=junit --reporter-outfile=${{ inputs.junit-file }}
+      # Tee Bun's console output to an action-local file: Bun's JUnit <failure>
+      # carries only the error `type` (no message), but the console output has
+      # the full assertion message (our structured diff). The summary step merges
+      # it into the JUnit. `shell: bash` runs with `set -o pipefail` by default,
+      # so a failing `bun test` still fails this step through the pipe (tee's
+      # success doesn't mask the test failure).
+      run: bun test ${{ inputs.paths }} --reporter=junit --reporter-outfile=${{ inputs.junit-file }} 2>&1 | tee apitest-console.log
 
-    # Parse the JUnit XML into inline annotations + a Markdown job summary. Runs
-    # even when tests fail (the report is written regardless); the job still fails
-    # because the Test step failed. The script ships with this action.
+    # Parse the JUnit XML into inline annotations + a Markdown job summary, and
+    # merge the captured console messages into the JUnit <failure> elements (so
+    # the JUnit artifact itself carries the message). Runs even when tests fail
+    # (the report is written regardless); the job still fails because the Test
+    # step failed. The script ships with this action.
     - name: Job summary + annotations
       if: always()
       shell: bash
       working-directory: ${{ inputs.working-directory }}
-      run: bun "${{ github.action_path }}/scripts/ci-summary.mjs" "${{ inputs.junit-file }}"
+      run: bun "${{ github.action_path }}/scripts/ci-summary.mjs" "${{ inputs.junit-file }}" apitest-console.log
