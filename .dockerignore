@@ -1,0 +1,9 @@
+node_modules
+dist
+reports
+.git
+.github
+*.log
+DESIGN.md
+README.md
+package-lock.json
