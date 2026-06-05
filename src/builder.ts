@@ -16,8 +16,11 @@ import {
   assertHeader,
   assertJson,
   assertJsonStrict,
+  assertSchema,
   assertStatus,
+  assertUnder,
   type AssertContext,
+  type SchemaInput,
 } from './assert'
 import type { Client, HeaderValue, HttpMethod, RetryOptions, RequestOptions } from './client'
 
@@ -31,13 +34,23 @@ export interface ApiResponse<T> {
   body: T
   /** The underlying fetch `Response` (already consumed). */
   raw: Response
+  /**
+   * Wall-clock time of the request in milliseconds, measured around `execute()`.
+   * With retry enabled this covers **all** attempts; since retry is opt-in and
+   * off by default, in the common (single-attempt) case it is the time of the
+   * one request. Surfaced so callers can read it directly (and `.expectUnder()`
+   * asserts against it).
+   */
+  durationMs: number
 }
 
 /**
  * A queued assertion: runs against the resolved response and a context carrying
- * the request `{ method, url }` for error messages; throws on failure.
+ * the request `{ method, url }` for error messages; throws on failure. May be
+ * async (a Standard Schema `validate` can return a Promise), so the runner
+ * awaits each assertion in declared order.
  */
-type Assertion<T> = (res: ApiResponse<T>, ctx: AssertContext) => void
+type Assertion<T> = (res: ApiResponse<T>, ctx: AssertContext) => void | Promise<void>
 
 /**
  * A fluent, awaitable request builder. Configuration methods and assertion
@@ -86,6 +99,17 @@ export interface RequestBuilder<T = unknown> extends PromiseLike<ApiResponse<T>>
   expectJson(partial: unknown): this
   /** Assert the body deep-equals `value`. */
   expectJsonStrict(value: unknown): this
+  /**
+   * Assert the body validates against `schema`: either a Standard Schema
+   * (zod/valibot/arktype/… — anything exposing `['~standard']`) or a plain
+   * predicate `(body) => boolean`. Standard Schema `validate` may be async.
+   */
+  expectSchema(schema: SchemaInput): this
+  /**
+   * Assert the request completed within `ms` milliseconds (wall-clock around the
+   * request; all attempts when retry is enabled). Reads `response.durationMs`.
+   */
+  expectUnder(ms: number): this
   /** Perform the request, run assertions, and resolve to the response. */
   send(): Promise<ApiResponse<T>>
 }
@@ -241,6 +265,20 @@ export function createRequestBuilder<T>(
       return this
     },
 
+    expectSchema(schema) {
+      // assertSchema may return a Promise (async Standard Schema `validate`); the
+      // run loop awaits it, so returning it here preserves fail-fast ordering.
+      assertions.push((res, ctx) => assertSchema(ctx, schema, res.body))
+      return this
+    },
+
+    expectUnder(ms) {
+      assertions.push((res, ctx) => {
+        assertUnder(ctx, ms, res.durationMs)
+      })
+      return this
+    },
+
     send() {
       if (!pending) pending = run()
       return pending
@@ -328,19 +366,27 @@ export function createRequestBuilder<T>(
   }
 
   async function run(): Promise<ApiResponse<T>> {
+    // Measure the wall-clock time of the request. With retry enabled this spans
+    // ALL attempts (the whole `execute()` loop); since retry is opt-in and off by
+    // default, in the common single-attempt case this is the one request's time.
+    const start = performance.now()
     const raw = await execute()
+    const durationMs = performance.now() - start
     const parsed = await parseBody<T>(raw)
     const response: ApiResponse<T> = {
       status: raw.status,
       headers: raw.headers,
       body: parsed,
       raw,
+      durationMs,
     }
     // Context for assertion messages: the same URL fetch was sent to.
     const ctx: AssertContext = { method, url: client.resolveUrl(path, query) }
-    // Fail-fast: run in declared order; the first failing matcher throws.
+    // Fail-fast: await in declared order so an async assertion (e.g. a Standard
+    // Schema with an async `validate`) is fully settled before the next runs; the
+    // first rejection/throw stops the rest.
     for (const assertion of assertions) {
-      assertion(response, ctx)
+      await assertion(response, ctx)
     }
     return response
   }

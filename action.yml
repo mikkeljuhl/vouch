@@ -1,0 +1,59 @@
+name: 'apitest — run API tests'
+description: 'Run apitest API tests with Bun, emit JUnit, and post inline annotations + a job summary.'
+branding:
+  icon: 'check-circle'
+  color: 'green'
+
+inputs:
+  paths:
+    description: 'Test paths/globs to run (default: all discovered tests).'
+    required: false
+    default: ''
+  bun-version:
+    description: 'Bun version passed to oven-sh/setup-bun.'
+    required: false
+    default: 'latest'
+  working-directory:
+    description: 'Directory to install and run in.'
+    required: false
+    default: '.'
+  typecheck:
+    description: 'Run `tsc --noEmit` before the tests (set "true" to enable).'
+    required: false
+    default: 'false'
+  junit-file:
+    description: 'JUnit output path, relative to working-directory.'
+    required: false
+    default: 'reports/junit.xml'
+
+runs:
+  using: 'composite'
+  steps:
+    - uses: oven-sh/setup-bun@v2
+      with:
+        bun-version: ${{ inputs.bun-version }}
+
+    - name: Install
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: bun install --frozen-lockfile
+
+    - name: Typecheck
+      if: ${{ inputs.typecheck == 'true' }}
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: bunx tsc --noEmit
+
+    - name: Test
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: bun test ${{ inputs.paths }} --reporter=junit --reporter-outfile=${{ inputs.junit-file }}
+
+    # Parse the JUnit XML into inline annotations + a Markdown job summary. Runs
+    # even when tests fail (the report is written regardless); the job still fails
+    # because the Test step failed. The script ships with this action.
+    - name: Job summary + annotations
+      if: always()
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: bun "${{ github.action_path }}/scripts/ci-summary.mjs" "${{ inputs.junit-file }}"

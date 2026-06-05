@@ -1,13 +1,10 @@
 name: CI
 
-# Repo-local CI for the framework's own dogfood suite. Runs under Bun (the
-# default runner). A packaged reusable workflow/action stays deferred
-# (DESIGN.md §10) — this runs OUR tests only.
+# Repo-local CI that DOGFOODS the packaged composite action (`uses: ./`) to run
+# the framework's own suite — so green CI also verifies the action consumers use.
 on:
   pull_request:
 
-# Annotations and the job summary need no extra scopes (they're log commands and
-# a file write). Keep the token least-privileged.
 permissions:
   contents: read
 
@@ -18,27 +15,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: oven-sh/setup-bun@v2
+      # The composite action (action.yml) does: setup-bun → install → typecheck
+      # → bun test (JUnit) → inline annotations + job summary.
+      - uses: ./
         with:
-          bun-version: latest
-
-      - name: Install
-        run: bun install --frozen-lockfile
-
-      # Bun transpiles + type-strips but never type-checks. This is the only
-      # gate that fails CI on type errors. Runs before the suite so a type
-      # error short-circuits the (network-hitting) test step.
-      - name: Typecheck
-        run: bun run typecheck
-
-      # The suite hits a live public API (jsonplaceholder). Emit JUnit XML for
-      # the summary/annotation step.
-      - name: Test
-        run: bun test --reporter=junit --reporter-outfile=reports/junit.xml
-
-      # Parse the JUnit XML into inline annotations + a Markdown job summary.
-      # Runs even when tests fail (the report is written regardless); the job
-      # still fails because the Test step failed.
-      - name: Job summary + annotations
-        if: always()
-        run: bun scripts/ci-summary.mjs reports/junit.xml
+          typecheck: 'true'

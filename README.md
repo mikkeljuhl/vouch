@@ -78,8 +78,30 @@ docker run --rm \
 
 ### 3. CI (GitHub Actions)
 
-Use `oven-sh/setup-bun`, run `bun test` with the JUnit reporter, then feed the XML
-to the repo-local summary script. This mirrors [`.github/workflows/ci.yml`](./.github/workflows/ci.yml):
+**Easiest — the packaged composite action.** It does setup-bun → install →
+(optional) typecheck → `bun test` (JUnit) → inline annotations + job summary:
+
+```yaml
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: your-org/apitest@v1        # this repo provides action.yml at its root
+        with:
+          typecheck: 'true'              # optional; runs tsc --noEmit first
+          # paths: tests                 # optional; default = all discovered tests
+          # bun-version: latest
+          # working-directory: .
+          # junit-file: reports/junit.xml
+```
+
+**Or wire the steps yourself** — use `oven-sh/setup-bun`, run `bun test` with the
+JUnit reporter, then feed the XML to the summary script. This mirrors
+[`.github/workflows/ci.yml`](./.github/workflows/ci.yml) (which itself dogfoods
+the action via `uses: ./`):
 
 ```yaml
 jobs:
@@ -223,6 +245,8 @@ until you `await` the builder (or call `.send()`).
 | `.expectHeader(name, value)` | Assert a response header equals a string or matches a `RegExp`. |
 | `.expectJson(partial)` | **Partial** match — body contains `partial` (deep subset). |
 | `.expectJsonStrict(value)` | **Strict** match — body deep-equals `value`. |
+| `.expectSchema(schema)` | Validate the body against a **Standard Schema** (zod/valibot/arktype/…) or a predicate `(body) => boolean`. |
+| `.expectUnder(ms)` | Assert the request completed within `ms` (checks `response.durationMs`). |
 | `.send()` | Perform the request and resolve to the response (same as `await`). |
 
 **Partial vs strict:** `.expectJson({ id: 1 })` passes as long as the body
@@ -248,8 +272,48 @@ interface ApiResponse<T> {
   headers: Headers   // native, case-insensitive
   body: T            // parsed JSON when the response is JSON, else raw text
   raw: Response      // the underlying fetch Response (already consumed)
+  durationMs: number // wall-clock time of the request (all attempts if retried)
 }
 ```
+
+### Schema & latency assertions
+
+`.expectSchema(schema)` validates the body against a **Standard Schema** —
+anything exposing the `['~standard']` property, including **zod ≥ 3.24**, valibot,
+and arktype. The framework adds **no dependency**: it only reads the standard
+interface, so you bring your own schema library (if any).
+
+```ts
+import { z } from 'zod' // zod ≥ 3.24 implements Standard Schema
+
+const User = z.object({ id: z.number(), name: z.string() })
+
+await client.get('/users/1').expectStatus(200).expectSchema(User)
+```
+
+A plain predicate works too — handy when you don't want a schema library:
+
+```ts
+await client
+  .get('/users/1')
+  .expectSchema((body) => typeof (body as any)?.id === 'number')
+```
+
+On failure `.expectSchema()` throws an `AssertionError` listing the schema's issue
+messages (and paths when present). A Standard Schema's `validate` may be async; the
+assertion is awaited, so async validation is fully supported.
+
+`.expectUnder(ms)` asserts the request finished within a latency budget:
+
+```ts
+const res = await client.get('/users/1').expectStatus(200).expectUnder(200)
+
+// durationMs is also available directly on the awaited response.
+console.log(res.durationMs)
+```
+
+`durationMs` is the wall-clock time around the request; with retry enabled it
+covers all attempts (retry is opt-in, so by default it's the single request time).
 
 ### File uploads
 
@@ -362,13 +426,11 @@ script is repo-local and not shipped in the package.
 
 Out of MVP scope, designed not to be precluded (see [`DESIGN.md`](./DESIGN.md) §10):
 
-- **Packaged GitHub Action / reusable workflow** — wrap setup/run/report.
 - **Standalone compiled binary** (`bun build --compile`) — a true install-nothing
   artifact; needs a small homegrown test collector (Bun's runner isn't an
   embeddable API). Docker is the install-nothing path for now.
 - **Bundled build for non-TS-aware consumers** — the package currently ships TS
   source; a compiled `dist/` is only needed for non-TS publishers.
-- **JSON-schema & latency/SLA assertions** — `.expectSchema(...)`, `.expectUnder(ms)`.
 - **Injectable matcher hook** — for runner-native diffs.
 - **Named variable store** / declarative format.
 - **Native per-language SDKs** (Java/Go/etc.) — only if an org forces it.

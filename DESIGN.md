@@ -167,7 +167,9 @@ client.get<T>(path) / .post / .put / .patch / .delete
   .expectHeader(name, value | RegExp)
   .expectJson(partial)        // subset match
   .expectJsonStrict(value)    // deep-equal
-  // → await resolves to { status, headers, body, raw }
+  .expectSchema(schema)       // Standard Schema (zod/valibot/…) or (body)=>boolean
+  .expectUnder(ms)            // latency: response.durationMs <= ms
+  // → await resolves to { status, headers, body, raw, durationMs }
 ```
 
 The lifecycle (`test`/`describe`/`beforeAll`) comes from the **host runner**
@@ -302,9 +304,9 @@ we ever publish for non-TS-aware consumers (deferred, §10).
 Out of scope now, designed not to be precluded:
 
 - **Native per-language SDKs** (Java/Go/etc.) — only if an org forces it.
-- **Packaged GitHub Action / reusable workflow.**
+- **Standalone compiled binary** (`bun build --compile`) — Docker covers the
+  zero-install need; a true install-nothing binary needs a homegrown collector.
 - **Bundled build for non-TS-aware consumers** (currently shipped as TS source).
-- **JSON-schema & latency assertions** — `.expectSchema(...)`, `.expectUnder(ms)`.
 - **Injectable matcher hook** for runner-native diffs.
 - **Named variable store** / declarative format.
 - **Registry publishing** — once the API stabilizes.
