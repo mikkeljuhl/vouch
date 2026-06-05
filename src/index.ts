@@ -8,6 +8,8 @@ export type {
   RetryOptions,
   RequestOptions,
   HttpMethod,
+  OutgoingRequest,
+  CookieJar,
 } from './client'
 export type { RequestBuilder, ApiResponse } from './builder'
 export { AssertionError } from './assert'
