@@ -2,16 +2,16 @@
 # toolchain can run API tests with one `docker run`. (DESIGN.md §1/§3.)
 #
 # Self-test (default):
-#   docker build -t apitest .
-#   docker run --rm apitest                      # runs the baked dogfood suite
+#   docker build -t vouch .
+#   docker run --rm vouch                      # runs the baked dogfood suite
 #
 # Run YOUR tests (mount them over /app/tests):
-#   docker run --rm -v "$PWD/tests:/app/tests" apitest
+#   docker run --rm -v "$PWD/tests:/app/tests" vouch
 #   # emit JUnit to the host:
 #   docker run --rm -v "$PWD/tests:/app/tests" -v "$PWD/reports:/app/reports" \
-#     apitest --reporter=junit --reporter-outfile=/app/reports/junit.xml
+#     vouch --reporter=junit --reporter-outfile=/app/reports/junit.xml
 #
-# Your test files import the framework by name: `from '@your-org/apitest'`
+# Your test files import the framework by name: `from '@mikkeljuhl/vouch'`
 # (resolved via the node_modules symlink created below).
 
 FROM oven/bun:1
@@ -29,9 +29,9 @@ COPY src ./src
 RUN bun install --frozen-lockfile
 
 # Make the package importable by its published name for mounted user tests:
-# node_modules/@your-org/apitest -> /app, resolved through the exports map
+# node_modules/@mikkeljuhl/vouch -> /app, resolved through the exports map
 # (which points at ./src/index.ts — Bun runs the TS source directly).
-RUN mkdir -p node_modules/@your-org && ln -sf /app node_modules/@your-org/apitest
+RUN mkdir -p node_modules/@mikkeljuhl && ln -sf /app node_modules/@mikkeljuhl/vouch
 
 # Bake the dogfood suite + reporting script so `docker run` self-tests by default.
 COPY tests ./tests

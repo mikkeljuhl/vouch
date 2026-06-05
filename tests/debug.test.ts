@@ -16,7 +16,7 @@ describe('debug diagnostics', () => {
   afterEach(() => {
     globalThis.fetch = realFetch
     process.stderr.write = realStderrWrite
-    delete process.env.APITEST_DEBUG
+    delete process.env.VOUCH_DEBUG
   })
 
   /** Spy on stderr, accumulating everything written into `captured`. */
@@ -41,7 +41,7 @@ describe('debug diagnostics', () => {
 
     await client.get('/users/1').expectStatus(200)
 
-    expect(captured).toContain('── apitest')
+    expect(captured).toContain('── vouch')
     expect(captured).toContain('→ GET https://api.example.com/users/1')
     expect(captured).toContain('← 200')
   })
@@ -78,7 +78,7 @@ describe('debug diagnostics', () => {
     const client = createClient({ baseUrl: 'https://api.example.com' }) // debug OFF
 
     await client.get('/x').debug().expectStatus(200)
-    expect(captured).toContain('── apitest')
+    expect(captured).toContain('── vouch')
     expect(captured).toContain('← 200')
 
     // A subsequent request without .debug() does not dump.
@@ -138,10 +138,10 @@ describe('debug diagnostics', () => {
     expect(captured).toContain('corr-123')
   })
 
-  test("APITEST_DEBUG env var enables diagnostics (truthy ⇒ 'onFailure')", async () => {
+  test("VOUCH_DEBUG env var enables diagnostics (truthy ⇒ 'onFailure')", async () => {
     stubFetch(() => new Response('ok', { status: 500 }))
     spyStderr()
-    process.env.APITEST_DEBUG = '1'
+    process.env.VOUCH_DEBUG = '1'
     const client = createClient({ baseUrl: 'https://api.example.com' })
 
     // 'onFailure': no dump on pass, dump on a failed assertion.
@@ -149,14 +149,14 @@ describe('debug diagnostics', () => {
     expect(captured).toBe('')
 
     await expect(client.get('/env').expectStatus(200).send()).rejects.toThrow()
-    expect(captured).toContain('── apitest')
+    expect(captured).toContain('── vouch')
     expect(captured).toContain('→ GET https://api.example.com/env')
   })
 
-  test("APITEST_DEBUG=always selects 'always' (dumps on pass)", async () => {
+  test("VOUCH_DEBUG=always selects 'always' (dumps on pass)", async () => {
     stubFetch(() => new Response('ok', { status: 200 }))
     spyStderr()
-    process.env.APITEST_DEBUG = 'always'
+    process.env.VOUCH_DEBUG = 'always'
     const client = createClient({ baseUrl: 'https://api.example.com' })
 
     await client.get('/env2').expectStatus(200)

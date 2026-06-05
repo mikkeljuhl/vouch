@@ -295,7 +295,7 @@ export function formatDebugDump(
   const headerNames = redact?.headers
   const bodyKeys = redact?.bodyKeys ?? []
   const lines: string[] = []
-  lines.push('── apitest ─────────────────────────────')
+  lines.push('── vouch ─────────────────────────────')
 
   // Request side.
   lines.push(`→ ${req.method} ${req.url}`)
@@ -557,7 +557,7 @@ export function createRequestBuilder<T>(
     // re-serialized by fetch per attempt, so only streams are unsafe to retry.
     if (times > 0 && body instanceof ReadableStream) {
       throw new Error(
-        'apitest: a ReadableStream body cannot be retried; set .retry({times:0}) or use a Blob/Buffer',
+        'vouch: a ReadableStream body cannot be retried; set .retry({times:0}) or use a Blob/Buffer',
       )
     }
 

@@ -1,5 +1,5 @@
 {
-  "name": "@your-org/apitest",
+  "name": "@mikkeljuhl/vouch",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -23,7 +23,7 @@
     "dist"
   ],
   "bin": {
-    "apitest": "./cli/apitest.ts"
+    "vouch": "./cli/vouch.ts"
   },
   "scripts": {
     "test": "bun test",

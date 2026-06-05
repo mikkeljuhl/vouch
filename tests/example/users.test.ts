@@ -1,7 +1,7 @@
 /**
  * Dogfood example — users.
  *
- * This file is written the way a *consumer* of `@your-org/apitest` would write
+ * This file is written the way a *consumer* of `@mikkeljuhl/vouch` would write
  * a real E2E suite (DESIGN.md §3): the client is created once in `beforeAll` and
  * held in a file-scoped `let client`, the base URL comes from an env var with a
  * sensible default, and auth/tracing are plain header callables resolved per
@@ -37,7 +37,7 @@ describe('users (live: jsonplaceholder)', () => {
         // a distinct request id. Proves per-request header evaluation.
         'X-Request-Id': () => crypto.randomUUID(),
         // A plain static header for contrast.
-        'X-Test-Run': 'apitest-dogfood',
+        'X-Test-Run': 'vouch-dogfood',
       },
       timeoutMs: 15_000,
       // Factory-default retry is off (opt-in per call) per DESIGN.md §8.
