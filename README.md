@@ -192,11 +192,20 @@ interface RetryOptions {
   when?: (res: Response) => boolean      // caller-authoritative retry predicate
 }
 
+interface OutgoingRequest {
+  method: string
+  url: string                            // fully-resolved; mutable
+  headers: Record<string, string>        // fully-resolved; MUTATE to add/override
+  body: RequestInit['body']              // read for signing
+}
+
 interface ClientOptions {
   baseUrl: string
   headers?: Record<string, HeaderValue>  // values may be callables
   timeoutMs?: number                     // default applied to every request
   retry?: RetryOptions                   // default retry policy (opt-in)
+  cookies?: boolean                      // opt-in in-memory session jar (default false)
+  beforeRequest?: (req: OutgoingRequest) => void | Promise<void>  // per-attempt hook
 }
 ```
 
@@ -222,11 +231,69 @@ interface ClientOptions {
   overridable per call with `.timeout(ms)`. No default if omitted.
 - **`retry`** — default retry policy, overridable per call with `.retry(...)`.
   Omit it (or use `{ times: 0 }`) for no retries. See [Retry semantics](#retry-semantics).
+- **`cookies`** — opt-in in-memory session jar (default `false`). See
+  [Sessions & cookies](#sessions--cookies).
+- **`beforeRequest`** — a per-attempt hook to mutate the outgoing request (e.g.
+  request signing). See [Request signing / hooks](#request-signing--hooks).
 
 The returned `Client` exposes `get`/`post`/`put`/`patch`/`delete<T>(path)`, each
 returning a fluent `RequestBuilder<T>`. (It also exposes the lower-level
-`baseUrl`, `timeoutMs`, `retry`, `resolveHeaders`, `resolveUrl`, and `_request`
-seams used internally.)
+`baseUrl`, `timeoutMs`, `retry`, `cookies`, `resolveHeaders`, `resolveUrl`, and
+`_request` seams used internally.)
+
+### Sessions & cookies
+
+Set `cookies: true` for an **in-memory, per-client cookie jar** so a login that
+returns `Set-Cookie` is followed by authenticated calls automatically:
+
+```ts
+const client = createClient({ baseUrl, cookies: true })
+
+// 1. Log in — the response's Set-Cookie is stored in the jar.
+await client.post('/login').json({ user: 'ada', pass: 's3cret' }).expectStatus(200)
+
+// 2. Subsequent calls on the SAME client auto-send `Cookie: …`.
+await client.get('/me').expectStatus(200).expectJson({ user: 'ada' })
+
+// Seed / inspect / clear the jar directly when needed:
+client.cookies.set('locale', 'en')
+client.cookies.get('session')      // → string | undefined
+client.cookies.getAll()            // → Record<string, string>
+client.cookies.clear()
+```
+
+This is a **simplified test-session jar**: only `name=value` is tracked
+(domain/path/expiry/attributes are ignored), scoped to the one client instance.
+A per-request `.headers({ cookie: '…' })` overrides the jar entirely for that
+call. A `Set-Cookie` with an empty value / `Max-Age=0` / past `Expires` deletes
+the cookie.
+
+### Request signing / hooks
+
+`beforeRequest` runs inside the client **once per attempt** — after headers are
+resolved + cookies attached + the URL is built, and **before** `fetch`. Mutate
+`req.headers` / `req.url` in place (it may be async; it is awaited):
+
+```ts
+import { createHmac } from 'node:crypto'
+
+const client = createClient({
+  baseUrl,
+  beforeRequest: (req) => {
+    const payload = `${req.method}\n${req.url}\n${req.body ?? ''}`
+    req.headers['x-signature'] = createHmac('sha256', SECRET).update(payload).digest('hex')
+    req.headers['x-request-id'] = crypto.randomUUID()
+  },
+})
+
+await client.post('/orders').json({ sku: 'A1', qty: 2 }).expectStatus(201)
+```
+
+Because it runs last, the hook wins the precedence chain:
+`factory headers < per-request .headers() < cookie jar < beforeRequest`. Running
+per attempt means a retry **re-signs** correctly. The body is readable for
+string/`Blob`/`URLSearchParams`/`FormData` bodies; a `ReadableStream` body is not
+re-readable and so cannot be signed from its content.
 
 ### The request builder
 

@@ -98,6 +98,8 @@ interface ClientOptions {
   headers?: Record<string, HeaderValue>
   timeoutMs?: number              // default applied to every request
   retry?: { times: number; when?: (res: Response) => boolean }  // default
+  cookies?: boolean               // opt-in in-memory session jar (default false)
+  beforeRequest?: (req: OutgoingRequest) => void | Promise<void>  // per-attempt mutate hook
 }
 
 function createClient(opts: ClientOptions): Client
@@ -108,6 +110,63 @@ function createClient(opts: ClientOptions): Client
   This is the whole auth story: a token-bearing header is just a callable; the
   user caches inside the callable if they don't want per-request cost.
 - **Defaults** (`timeoutMs`, `retry`) are overridable per request.
+
+### Sessions & cookies (opt-in)
+
+Set `cookies: true` to enable an **in-memory, per-client cookie jar**, turning
+login → authenticated-call flows into a one-liner on the same client:
+
+```ts
+const client = createClient({ baseUrl, cookies: true })
+await client.post('/login').json({ user, pass })   // stores Set-Cookie
+await client.get('/me')                             // auto-sends Cookie: …
+```
+
+- After each response the jar reads `Set-Cookie` via `response.headers.getSetCookie()`
+  (Bun + Node 18.14+) and stores each as `name=value` (last write wins).
+- Before each request, when the jar is non-empty, a `Cookie: a=1; b=2` header is
+  attached — **unless** the request already carries a `cookie` header, in which
+  case the **per-request `.headers({ cookie })` overrides the jar entirely** (the
+  jar is not merged in). This keeps the override predictable.
+- Deletion: a `Set-Cookie` with an **empty value**, `Max-Age=0` (or negative),
+  or an `Expires` in the past removes that cookie from the jar.
+- `client.cookies` exposes `{ get(name), getAll(), set(name,value), clear() }`
+  for seeding/inspection (no-op empty jar when `cookies` is false).
+
+> **Simplified test-session jar.** This is *not* a spec-compliant browser jar:
+> only `name=value` is tracked; domain/path/expiry/attribute matching is ignored
+> (attributes are parsed only to detect deletion). The jar is scoped to one
+> client instance, in memory, for the lifetime of a test session.
+
+### `beforeRequest` hook
+
+`beforeRequest` is invoked inside `_request`, **once per attempt**, *after*
+headers are resolved + cookies attached + the URL is built, and *before* `fetch`:
+
+```ts
+interface OutgoingRequest {
+  method: string
+  url: string                     // fully-resolved (base + path + query); mutable
+  headers: Record<string, string> // fully-resolved (callables + cookies applied); MUTATE
+  body: RequestInit['body']       // as set by .json()/.body()/.form() (read for signing)
+}
+```
+
+The hook may **mutate `req.headers` (and `req.url`) in place** and may be async
+(it is awaited); the client then fetches with the mutated values. Because it runs
+last, the **header precedence end state** is:
+
+```
+factory headers  <  per-request .headers()  <  cookie jar  <  beforeRequest
+```
+
+Use it for request signing (HMAC/SigV4 computed from method + url + body),
+correlation IDs, etc. Running per attempt means retries **re-sign** correctly.
+
+> **Body readability for signing.** The hook reads `req.body` as set by
+> `.json()`/`.body()`/`.form()` (a string or `URLSearchParams`/`Blob`/`FormData`).
+> A `ReadableStream` body is **not re-readable**, so stream bodies cannot be
+> signed from their content.
 
 ### Authoring example
 
