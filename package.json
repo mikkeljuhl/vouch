@@ -19,8 +19,13 @@
     "./package.json": "./package.json"
   },
   "files": [
-    "dist"
+    "dist",
+    "src",
+    "cli"
   ],
+  "bin": {
+    "apitest": "./cli/apitest.ts"
+  },
   "scripts": {
     "build": "tsup",
     "prepare": "tsup",
