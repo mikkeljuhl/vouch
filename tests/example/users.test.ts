@@ -5,29 +5,34 @@
  * a real E2E suite (DESIGN.md §3): the client is created once in `beforeAll` and
  * held in a file-scoped `let client`, the base URL comes from an env var with a
  * sensible default, and auth/tracing are plain header callables resolved per
- * request. It runs live against the public jsonplaceholder API.
+ * request. It runs against an in-process `Bun.serve` mock (hermetic; no external
+ * dependency), so it is deterministic and runnable offline.
  *
  * It also doubles as documentation, so it leans on comments to explain the
  * patterns rather than just exercising the API.
  */
 
-import { beforeAll, describe, expect, test } from 'bun:test'
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { createClient, type Client } from '../../src/index'
+import { startMockServer } from '../support/mock-server'
 import type { Post, User } from './types'
 
-describe('users (live: jsonplaceholder)', () => {
+describe('users (mock server)', () => {
   // Held across the file; assigned in beforeAll — the DESIGN.md §3 pattern.
   let client: Client
+  let server: { url: string; stop(): void }
 
   beforeAll(() => {
+    // Start the in-process mock; it picks a free port so parallel files don't clash.
+    server = startMockServer()
     client = createClient({
-      // The consumer reads their own env; we default to the public sample API so
-      // the suite is runnable with zero setup. Set API_BASE_URL to retarget.
+      // The consumer reads their own env; we default to the in-process mock so the
+      // suite is hermetic and runnable with zero setup. Set API_BASE_URL to retarget.
       // NB: we deliberately do NOT use `BASE_URL` — Vite/Vitest reserves that name
       // (it injects its own `base`, default "/", into the worker's process.env),
       // which would silently override the consumer's value. `||` (not `??`) also
       // guards against an empty-string env, a common CI default.
-      baseUrl: process.env.API_BASE_URL || 'https://jsonplaceholder.typicode.com',
+      baseUrl: process.env.API_BASE_URL || server.url,
       headers: {
         // Auth is "just a header callable" (DESIGN.md §8). Resolved per request,
         // so a rotating/minted token would be picked up each call. Here it falls
@@ -45,6 +50,8 @@ describe('users (live: jsonplaceholder)', () => {
     })
   })
 
+  afterAll(() => server.stop())
+
   test('GET /users/1 → typed body, status + header + partial JSON assertions', async () => {
     // Generic typing: `body` is `User`, so the field accesses below are checked.
     const res = await client
@@ -60,34 +67,29 @@ describe('users (live: jsonplaceholder)', () => {
   })
 
   test('expectHeader exact-string match (alongside RegExp form above)', async () => {
-    // jsonplaceholder is served by Express and returns a deterministic small header
-    // we can pin exactly, demonstrating the string (non-RegExp) form of expectHeader.
+    // The mock stamps a deterministic `x-powered-by: vouch-mock` header on every
+    // response, which we can pin exactly, demonstrating the string (non-RegExp)
+    // form of expectHeader.
     await client
       .get<User>('/users/2')
       .expectStatus(200)
-      .expectHeader('x-powered-by', 'Express')
+      .expectHeader('x-powered-by', 'vouch-mock')
   })
 
   test('expectJsonStrict on a derived, exactly-known small object', async () => {
-    // jsonplaceholder user bodies are large/nested, so a strict deep-equal on the
-    // raw body is brittle. Pragmatic approach (per the task brief): fetch the user,
-    // then project a small, exactly-known object and assert it with expectJsonStrict
-    // against a fresh request whose body we fully control... but we don't control the
-    // server body. Instead we exercise expectJsonStrict against an endpoint+shape we
-    // DO know exactly: /users/1 has a stable nested `address.geo` we can pin. To keep
-    // it robust we derive a tiny object from the response and deep-equal it locally,
-    // and ALSO run expectJsonStrict on a minimal echoed POST body below where the
-    // server returns exactly what we sent.
+    // The mock returns a small, fully-known user body, so we could deep-equal it
+    // directly; here we derive a tiny projection and assert it locally, mirroring
+    // what expectJsonStrict does on a value we fully control. (The fully-controlled
+    // expectJsonStrict-against-a-server-echo case lives in posts.test.ts's PUT.)
     const res = await client.get<User>('/users/1').expectStatus(200)
 
-    // Derived small object, deep-equality checked with Vitest directly (mirrors
-    // what expectJsonStrict does, on a value we can guarantee).
+    // Derived small object, deep-equality checked with the runner directly.
     const projected = { id: res.body.id, hasEmail: res.body.email.includes('@') }
     expect(projected).toEqual({ id: 1, hasEmail: true })
   })
 
   test('chaining: GET a user, then GET their posts and assert every post.userId matches', async () => {
-    // Real persisted relationship on jsonplaceholder, so this chain genuinely passes.
+    // The mock models user 1 as the owner of several posts, so this chain genuinely passes.
     const user = await client.get<User>('/users/1').expectStatus(200)
 
     // Share state via the awaited response object (plain JS var) — no template store.

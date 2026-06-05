@@ -1,5 +1,6 @@
-import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from 'bun:test'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, mock, spyOn, test } from 'bun:test'
 import { createClient } from '../src/client'
+import { startMockServer } from './support/mock-server'
 
 /** Build a JSON Response with the given body/status/headers. */
 function jsonResponse(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
@@ -328,13 +329,21 @@ describe('RequestBuilder retry (mocked fetch)', () => {
 })
 
 /**
- * Live integration tests against a public API (jsonplaceholder). These run by
- * default; if the network is unavailable they fail loudly rather than silently
- * passing. Filter them out offline with `bun test --test-name-pattern` (or run
- * only the mocked suites).
+ * Real-HTTP integration tests against the in-process `Bun.serve` mock (hermetic;
+ * no external dependency). These exercise the full framework over a real socket
+ * — request building, fetch, parsing, assertions — while staying deterministic
+ * and runnable offline. The mock is started in beforeAll and stopped in afterAll.
  */
-describe('RequestBuilder (live: jsonplaceholder)', () => {
-  const live = createClient({ baseUrl: 'https://jsonplaceholder.typicode.com', timeoutMs: 15_000 })
+describe('RequestBuilder (mock server)', () => {
+  let live: ReturnType<typeof createClient>
+  let server: { url: string; stop(): void }
+
+  beforeAll(() => {
+    server = startMockServer()
+    live = createClient({ baseUrl: server.url, timeoutMs: 15_000 })
+  })
+
+  afterAll(() => server.stop())
 
   test('GET /todos/1 → 200 + partial JSON', async () => {
     const res = await live

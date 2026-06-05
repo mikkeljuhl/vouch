@@ -146,7 +146,7 @@ beforeAll(() => {
   client = createClient({
     // Read your own env. Use API_BASE_URL — NOT BASE_URL, which Vite/Vitest
     // reserves. `||` guards an empty-string env.
-    baseUrl: process.env.API_BASE_URL || 'https://jsonplaceholder.typicode.com',
+    baseUrl: process.env.API_BASE_URL || 'http://localhost:3000',
     headers: {
       // Auth is just a header callable, resolved per request (see API reference).
       Authorization: () => `Bearer ${process.env.API_TOKEN ?? 'demo-token'}`,

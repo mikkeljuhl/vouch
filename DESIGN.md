@@ -10,7 +10,8 @@ little as possible. It is distributed as a **Docker image** and a **CLI** so eve
 teams without a JavaScript toolchain can run tests with one command.
 
 This repo holds both the framework and a dogfooding example suite that runs
-against a public sample API so CI continuously self-tests the framework.
+against an in-process `Bun.serve` mock so CI continuously self-tests the framework
+(hermetic; no external dependency — fully deterministic and offline).
 
 ---
 
@@ -84,7 +85,7 @@ everything: (1) a nice API, (2) minimal CI setup, (3) minimal local setup.
 | **Per-request timeout** | Factory default + per-call override via `.timeout(ms)` |
 | **Reporting** | JUnit (Bun's built-in `--reporter=junit`) + a first-party job-summary script that parses the JUnit XML |
 | **Distribution** | (a) library consumed as TS via `bun add`; (b) **Docker image** (`oven/bun`); (c) **CLI** |
-| **Example suite** | Runs against a public sample API (jsonplaceholder / httpbin) |
+| **Example suite** | Runs against an in-process `Bun.serve` mock (hermetic; no external dependency — CI is fully deterministic/offline) |
 
 ---
 
@@ -420,7 +421,7 @@ src/
   index.ts         # public exports (createClient, types)
 cli/
   vouch.ts         # CLI entry: discover + run *.test.ts (Bun)
-tests/             # dogfood suite vs public sample API (uses bun:test)
+tests/             # dogfood suite vs an in-process Bun.serve mock (uses bun:test)
 Dockerfile         # oven/bun base + framework; `docker run -v ./tests ...`
 scripts/
   ci-summary.mjs   # parse JUnit XML (+ console log) → annotations, summary, enriched JUnit
