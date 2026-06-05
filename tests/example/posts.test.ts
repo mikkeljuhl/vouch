@@ -95,4 +95,25 @@ describe('posts (live: jsonplaceholder)', () => {
   test('DELETE /posts/1 → 200 (exercises the delete verb)', async () => {
     await client.delete('/posts/1').expectStatus(200)
   })
+
+  test('latency + schema: GET /posts/1 under a generous budget, body shape via predicate', async () => {
+    // .expectUnder uses a deliberately generous threshold so it stays resilient
+    // on slow CI/network; it asserts the request completes within the budget.
+    // .expectSchema(predicate) validates the shape without a schema library.
+    const res = await client
+      .get<Post>('/posts/1')
+      .expectStatus(200)
+      .expectUnder(10_000)
+      .expectSchema(
+        (body): boolean =>
+          typeof body === 'object' &&
+          body !== null &&
+          typeof (body as Post).id === 'number' &&
+          typeof (body as Post).title === 'string',
+      )
+
+    // durationMs is also available directly on the awaited response.
+    expect(typeof res.durationMs).toBe('number')
+    expect(res.durationMs).toBeGreaterThanOrEqual(0)
+  })
 })

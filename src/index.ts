@@ -11,5 +11,5 @@ export type {
 } from './client'
 export type { RequestBuilder, ApiResponse } from './builder'
 export { AssertionError } from './assert'
-export type { AssertContext } from './assert'
+export type { AssertContext, SchemaInput, StandardSchemaV1 } from './assert'
 export { fixture } from './fixtures'

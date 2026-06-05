@@ -23,6 +23,89 @@ export interface AssertContext {
   url: string
 }
 
+/**
+ * Minimal inline copy of the **Standard Schema v1** interface
+ * (https://standardschema.dev). We intentionally do **not** add a dependency on
+ * the `@standard-schema/spec` package — the spec surface is tiny, so we declare
+ * just what we consume here. Any validation library that implements Standard
+ * Schema (zod ≥ 3.24, valibot, arktype, …) exposes a `['~standard']` property and
+ * is therefore accepted by `.expectSchema()` without the framework taking on a
+ * runtime/dev dependency.
+ */
+export interface StandardSchemaV1<Input = unknown, Output = Input> {
+  readonly '~standard': StandardSchemaV1.Props<Input, Output>
+}
+
+export namespace StandardSchemaV1 {
+  /** The `~standard` properties we use: the version, vendor, and validator. */
+  export interface Props<Input = unknown, Output = Input> {
+    readonly version: 1
+    readonly vendor: string
+    /** Validate (sync or async); returns a success or a failure with issues. */
+    readonly validate: (value: unknown) => Result<Output> | Promise<Result<Output>>
+    /** Inferred input/output types (phantom — present only for type inference). */
+    readonly types?: Types<Input, Output> | undefined
+  }
+
+  /** A validation result is either a success carrying a value or a failure. */
+  export type Result<Output> = SuccessResult<Output> | FailureResult
+
+  export interface SuccessResult<Output> {
+    readonly value: Output
+    readonly issues?: undefined
+  }
+
+  export interface FailureResult {
+    readonly issues: ReadonlyArray<Issue>
+  }
+
+  export interface Issue {
+    readonly message: string
+    readonly path?: ReadonlyArray<PropertyKey | PathSegment> | undefined
+  }
+
+  export interface PathSegment {
+    readonly key: PropertyKey
+  }
+
+  export interface Types<Input = unknown, Output = Input> {
+    readonly input: Input
+    readonly output: Output
+  }
+}
+
+/**
+ * A schema accepted by `.expectSchema()`: either a Standard Schema object or a
+ * plain predicate `(body) => boolean` (truthy = valid). The predicate path keeps
+ * the simplest case dependency- and ceremony-free.
+ */
+export type SchemaInput = StandardSchemaV1 | ((body: unknown) => boolean)
+
+/** Runtime check for a Standard Schema: it carries a `~standard.validate`. */
+function isStandardSchema(schema: SchemaInput): schema is StandardSchemaV1 {
+  return (
+    typeof schema === 'object' &&
+    schema !== null &&
+    '~standard' in schema &&
+    typeof (schema as StandardSchemaV1)['~standard']?.validate === 'function'
+  )
+}
+
+/** Render a Standard Schema issue path (`a.b[0]`) for the error message. */
+function formatPath(path: StandardSchemaV1.Issue['path']): string {
+  if (!path || path.length === 0) return ''
+  const parts = path.map((seg) => {
+    const key = typeof seg === 'object' && seg !== null ? seg.key : seg
+    return typeof key === 'number' ? `[${key}]` : String(key)
+  })
+  // Join object keys with dots; array indices already carry their own brackets.
+  let out = ''
+  for (const part of parts) {
+    out += part.startsWith('[') || out === '' ? part : `.${part}`
+  }
+  return out
+}
+
 /** `GET https://… — ` prefix shared by every assertion message. */
 function prefix(ctx: AssertContext): string {
   return `${ctx.method} ${ctx.url} — `
@@ -175,4 +258,62 @@ export function assertJsonStrict(ctx: AssertContext, expected: unknown, body: un
       `${prefix(ctx)}expected body to deep-equal ${preview(expected)} but got ${preview(body)}`,
     )
   }
+}
+
+/**
+ * Assert the response wall-clock duration was at or under `maxMs`. `actualMs` is
+ * the measured time for the request (a single attempt unless retry is enabled).
+ */
+export function assertUnder(ctx: AssertContext, maxMs: number, actualMs: number): void {
+  if (actualMs > maxMs) {
+    // Round the measured value so the message stays readable (sub-ms precision
+    // isn't meaningful for an SLA-style threshold).
+    throw new AssertionError(
+      `${prefix(ctx)}expected response under ${maxMs}ms but took ${Math.round(actualMs)}ms`,
+    )
+  }
+}
+
+/**
+ * Assert the body validates against `schema`:
+ * - a **predicate** `(body) => boolean` — throws if it returns falsy;
+ * - a **Standard Schema** — runs `validate` (which MAY be async, hence the
+ *   `Promise<void>` return) and throws listing the issue messages (and paths
+ *   when present) if the result reports `issues`.
+ *
+ * The success `value` from a Standard Schema is ignored: `.expectSchema()` is a
+ * validation assertion, not a transform — the framework keeps the parsed body.
+ */
+export function assertSchema(
+  ctx: AssertContext,
+  schema: SchemaInput,
+  body: unknown,
+): void | Promise<void> {
+  if (!isStandardSchema(schema)) {
+    // Predicate path: truthy return means valid.
+    if (!schema(body)) {
+      throw new AssertionError(
+        `${prefix(ctx)}expected body to satisfy the predicate but it returned false; body was ${preview(body)}`,
+      )
+    }
+    return
+  }
+
+  const result = schema['~standard'].validate(body)
+  if (result instanceof Promise) {
+    return result.then((settled) => throwIfIssues(ctx, settled))
+  }
+  throwIfIssues(ctx, result)
+}
+
+/** Throw an `AssertionError` listing the issues if a Standard Schema failed. */
+function throwIfIssues(ctx: AssertContext, result: StandardSchemaV1.Result<unknown>): void {
+  if (!result.issues) return
+  const lines = result.issues.map((issue) => {
+    const path = formatPath(issue.path)
+    return path ? `${path}: ${issue.message}` : issue.message
+  })
+  throw new AssertionError(
+    `${prefix(ctx)}expected body to match schema but validation failed: ${lines.join('; ')}`,
+  )
 }
