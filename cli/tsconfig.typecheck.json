@@ -1,0 +1,23 @@
+{
+  // Baseline tsconfig shipped for consumers: `apitest --typecheck` writes a temp
+  // config that EXTENDS this and adds the consumer's test globs as `include`.
+  // The goal is a sane default that needs zero tsconfig authoring by the user:
+  //   - resolves our package types via its `exports` -> dist/index.d.ts
+  //     ("moduleResolution": "bundler" honors the exports map)
+  //   - resolves the `bun:test` import via `@types/bun` ("types": ["bun"])
+  //   - "allowImportingTsExtensions" so tests may import `./foo.ts` explicitly
+  //   - "skipLibCheck" so we never type-check our own (or anyone's) .d.ts
+  "compilerOptions": {
+    "strict": true,
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "noEmit": true,
+    "skipLibCheck": true,
+    "types": ["bun"],
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": false,
+    "esModuleInterop": true
+  }
+}

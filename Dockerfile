@@ -19,8 +19,12 @@ FROM oven/bun:1
 WORKDIR /app
 
 # Install deps first for layer caching. The package ships TypeScript source —
-# no build step — so there's nothing to compile; deps are dev-only tooling.
-COPY package.json bun.lock tsconfig.json ./
+# no runtime build — so there's nothing to compile to run; deps are dev-only
+# tooling. `bun install` runs the package's `prepare` (tsc -p tsconfig.build.json)
+# to emit `.d.ts` into dist/, so we copy tsconfig.build.json too. The image runs
+# the TS source directly (the `bun` export condition → ./src/index.ts); dist/ is
+# not needed at runtime, but emitting it keeps `prepare` honest in the image.
+COPY package.json bun.lock tsconfig.json tsconfig.build.json ./
 COPY src ./src
 RUN bun install --frozen-lockfile
 
