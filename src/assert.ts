@@ -242,20 +242,172 @@ export function assertHeader(
   }
 }
 
+/**
+ * One path-level difference between an expected and an actual JSON value.
+ *
+ * `kind` is the category of mismatch; `path` is a dot/bracket path to the
+ * offending node (empty string = the root value). `expected`/`actual` carry the
+ * relevant values for rendering (e.g. the two primitives for a `value` diff, or
+ * the two lengths for a `length` diff). They are `undefined` when not applicable
+ * (`missing` has no actual; `extra` has no expected).
+ */
+export interface Difference {
+  kind: 'value' | 'type' | 'missing' | 'extra' | 'length'
+  path: string
+  expected?: unknown
+  actual?: unknown
+}
+
+/** The diff mode: `subset` mirrors `isSubset`, `strict` mirrors `deepEqual`. */
+type DiffMode = 'subset' | 'strict'
+
+/** Append an object-key segment to a path with dot notation. */
+function childKeyPath(base: string, key: string): string {
+  return base === '' ? key : `${base}.${key}`
+}
+
+/** Append an array-index segment to a path with bracket notation. */
+function childIndexPath(base: string, index: number): string {
+  return `${base}[${index}]`
+}
+
+/** The JSON "type" of a value, distinguishing null/array/object/primitive. */
+function jsonType(value: unknown): string {
+  if (value === null) return 'null'
+  if (Array.isArray(value)) return 'array'
+  return typeof value
+}
+
+/**
+ * Walk `expected` vs `actual` and collect every path-level difference.
+ *
+ * This is the single source of truth for what counts as a mismatch and it is
+ * defined to AGREE EXACTLY with the boolean helpers:
+ *  - `mode: 'subset'`  → `diff(...).length === 0` ⟺ `isSubset(actual, expected)`
+ *  - `mode: 'strict'`  → `diff(...).length === 0` ⟺ `deepEqual(expected, actual)`
+ *
+ * Semantics mirrored from those helpers:
+ *  - Primitives (and any value where `expected` is not a non-null object) are
+ *    compared with `deepEqual`; on mismatch we emit `type` when the JSON types
+ *    differ, else `value`.
+ *  - Arrays require EQUAL LENGTH (both modes); a mismatch emits a single
+ *    `length` diff for the array and does not recurse into elements (matching
+ *    the helpers, which short-circuit on length). Equal-length arrays recurse
+ *    element-wise — subset elements get subset treatment, strict get strict.
+ *  - Objects: keys in `expected` missing from `actual` → `missing`; common keys
+ *    recurse. In `strict` mode, keys in `actual` not in `expected` → `extra`.
+ *    In `subset` mode extra actual keys are allowed (not reported).
+ */
+export function diffJson(
+  expected: unknown,
+  actual: unknown,
+  mode: DiffMode,
+  path = '',
+  out: Difference[] = [],
+): Difference[] {
+  // When expected is a primitive/null, the helpers reduce to `deepEqual`.
+  if (expected === null || typeof expected !== 'object') {
+    if (!deepEqual(expected, actual)) {
+      const kind = jsonType(expected) !== jsonType(actual) ? 'type' : 'value'
+      out.push({ kind, path, expected, actual })
+    }
+    return out
+  }
+
+  // Expected is an object or array. If actual isn't the same shape, that's a
+  // type mismatch (object-vs-array, object-vs-null, object-vs-primitive).
+  const expIsArray = Array.isArray(expected)
+  if (actual === null || typeof actual !== 'object' || Array.isArray(actual) !== expIsArray) {
+    out.push({ kind: 'type', path, expected, actual })
+    return out
+  }
+
+  if (expIsArray) {
+    const expArr = expected as unknown[]
+    const actArr = actual as unknown[]
+    // Both helpers require equal array length and short-circuit otherwise.
+    if (expArr.length !== actArr.length) {
+      out.push({ kind: 'length', path, expected: expArr.length, actual: actArr.length })
+      return out
+    }
+    for (let i = 0; i < expArr.length; i++) {
+      diffJson(expArr[i], actArr[i], mode, childIndexPath(path, i), out)
+    }
+    return out
+  }
+
+  const expObj = expected as Record<string, unknown>
+  const actObj = actual as Record<string, unknown>
+  for (const key of Object.keys(expObj)) {
+    const childPath = childKeyPath(path, key)
+    if (!Object.prototype.hasOwnProperty.call(actObj, key)) {
+      out.push({ kind: 'missing', path: childPath, expected: expObj[key] })
+      continue
+    }
+    diffJson(expObj[key], actObj[key], mode, childPath, out)
+  }
+  if (mode === 'strict') {
+    for (const key of Object.keys(actObj)) {
+      if (!Object.prototype.hasOwnProperty.call(expObj, key)) {
+        out.push({ kind: 'extra', path: childKeyPath(path, key), actual: actObj[key] })
+      }
+    }
+  }
+  return out
+}
+
+/** Max characters for a single rendered value before truncation (per line). */
+const VALUE_MAX = 80
+/** Max number of diff lines shown before collapsing into `… and N more`. */
+const DIFF_CAP = 20
+
+/** Compact JSON for a single diff value, truncated so one field can't flood. */
+function diffValue(value: unknown): string {
+  return preview(value, VALUE_MAX)
+}
+
+/** Render one difference as a `path  expected … received …` line. */
+function formatDifference(diff: Difference): string {
+  const label = diff.path === '' ? '(root)' : diff.path
+  switch (diff.kind) {
+    case 'missing':
+      return `${label}  missing (expected key not present)`
+    case 'extra':
+      return `${label}  unexpected key (received ${diffValue(diff.actual)})`
+    case 'length':
+      return `${label}  array length expected ${diff.expected} received ${diff.actual}`
+    case 'type':
+    case 'value':
+      return `${label}  expected ${diffValue(diff.expected)} received ${diffValue(diff.actual)}`
+  }
+}
+
+/** Build the multi-line diff message body (cap applied) for a list of diffs. */
+function formatDiffMessage(diffs: Difference[], headline: string): string {
+  const lines = diffs.slice(0, DIFF_CAP).map((d) => `  • ${formatDifference(d)}`)
+  if (diffs.length > DIFF_CAP) {
+    lines.push(`  … and ${diffs.length - DIFF_CAP} more`)
+  }
+  const noun = diffs.length === 1 ? 'difference' : 'differences'
+  return `${headline} (${diffs.length} ${noun}):\n${lines.join('\n')}`
+}
+
 /** Assert the body contains `partial` (subset / partial match via `isSubset`). */
 export function assertJson(ctx: AssertContext, partial: unknown, body: unknown): void {
-  if (!isSubset(body, partial)) {
+  const diffs = diffJson(partial, body, 'subset')
+  if (diffs.length > 0) {
     throw new AssertionError(
-      `${prefix(ctx)}expected body to match (subset) ${preview(partial)} but got ${preview(body)}`,
+      `${prefix(ctx)}${formatDiffMessage(diffs, 'JSON body did not match (subset)')}`,
     )
   }
 }
 
 /** Assert the body deep-equals `expected` (full structural equality). */
 export function assertJsonStrict(ctx: AssertContext, expected: unknown, body: unknown): void {
-  if (!deepEqual(body, expected)) {
+  const diffs = diffJson(expected, body, 'strict')
+  if (diffs.length > 0) {
     throw new AssertionError(
-      `${prefix(ctx)}expected body to deep-equal ${preview(expected)} but got ${preview(body)}`,
+      `${prefix(ctx)}${formatDiffMessage(diffs, 'JSON body did not match (strict)')}`,
     )
   }
 }

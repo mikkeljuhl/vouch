@@ -257,11 +257,26 @@ requires an exact deep-equal of the whole body.
 **Fail-fast:** assertions run in declared order against the settled response; the
 first failing assertion throws an **`AssertionError`** and rejects the awaited
 builder, so no later assertion runs. The error message names the request
-(`METHOD url`), the expected, and the actual values.
+(`METHOD url`).
+
+**Structured JSON diffs.** When `.expectJson` / `.expectJsonStrict` fail, the
+message is a **path-level diff** (not a truncated expected/actual blob). Each
+difference shows a path — dot notation for object keys, `[i]` for array indices —
+and what was expected vs received. Missing keys, type mismatches, array-length
+mismatches, and (in strict mode) unexpected extra keys are each reported on their
+own line; the list is capped at 20 with `… and N more`:
+
+```
+GET https://api/users/1 — JSON body did not match (subset) (4 differences):
+  • role  expected "admin" received "user"
+  • team.id  expected 7 received 9
+  • team.members[2].id  expected 3 received 99
+  • profile  missing (expected key not present)
+```
 
 > **Caveat (Bun JUnit):** Bun's `--reporter=junit` emits a `<failure>` element
-> without the assertion message text — the full `AssertionError` message (expected
-> vs. actual) appears in the **run log**, not the XML. The summary script surfaces
+> without the assertion message text — the full `AssertionError` message (the
+> path-level diff) appears in the **run log**, not the XML. The summary script surfaces
 > the per-test failure; check the job log for the detailed message.
 
 Awaiting a builder resolves to an `ApiResponse<T>`:
@@ -431,7 +446,6 @@ Out of MVP scope, designed not to be precluded (see [`DESIGN.md`](./DESIGN.md) �
   embeddable API). Docker is the install-nothing path for now.
 - **Bundled build for non-TS-aware consumers** — the package currently ships TS
   source; a compiled `dist/` is only needed for non-TS publishers.
-- **Injectable matcher hook** — for runner-native diffs.
 - **Named variable store** / declarative format.
 - **Native per-language SDKs** (Java/Go/etc.) — only if an org forces it.
 - **Registry publishing** — once the API stabilizes.

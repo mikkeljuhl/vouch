@@ -221,9 +221,16 @@ message (method, URL, expected, actual). Because every runner treats a thrown
 error as a failing test, the same suite runs under Bun, Vitest, or `node --test`.
 
 - **Fail-fast:** the first failing expectation throws; later ones don't run.
-- **Trade-off vs. wrapping a runner's `expect`:** we forgo library-native diffs,
-  so we craft explicit expected/actual messages ourselves. A future option is an
-  injectable matcher hook for richer diffs, but the default stays dependency-free.
+- **Structured path-level diffs.** `.expectJson` (subset) and `.expectJsonStrict`
+  (deep-equal) no longer emit truncated expected/actual blobs. On mismatch a diff
+  walker compares expected vs actual and reports a list of differences, each with
+  a **path** (dot notation for object keys, `[i]` for array indices, e.g.
+  `team.members[2].id`) and a **kind** (`value`, `type`, `missing`, `extra`
+  (strict only), `length`). Per-value output is `JSON.stringify` truncated to a
+  sane length, and the list is capped (first 20, then `… and N more`). The walker
+  is the single source of truth for the message but agrees exactly with the
+  existing `isSubset`/`deepEqual` booleans, so **pass/fail behavior is unchanged**
+  — only the message improved. This stays dependency-free (no runner `expect`).
 
 ---
 
@@ -307,7 +314,6 @@ Out of scope now, designed not to be precluded:
 - **Standalone compiled binary** (`bun build --compile`) — Docker covers the
   zero-install need; a true install-nothing binary needs a homegrown collector.
 - **Bundled build for non-TS-aware consumers** (currently shipped as TS source).
-- **Injectable matcher hook** for runner-native diffs.
 - **Named variable store** / declarative format.
 - **Registry publishing** — once the API stabilizes.
 
