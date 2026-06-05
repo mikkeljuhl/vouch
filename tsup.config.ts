@@ -6,9 +6,9 @@ export default defineConfig({
   dts: true,
   clean: true,
   sourcemap: true,
-  // Match the supported runtime (engines: node >=24) so esbuild doesn't
-  // needlessly down-level modern syntax.
-  target: 'node24',
+  // Target the *lowest* supported runtime (engines: node >=22) so the emitted
+  // syntax runs on every supported Node without needless down-leveling.
+  target: 'node22',
   // Emit `.cjs` (not `.js`) for the CJS build so the `exports` map can route
   // `require` → `./dist/index.cjs` and `import` → `./dist/index.js` cleanly.
   outExtension({ format }) {
