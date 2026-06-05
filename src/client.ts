@@ -8,6 +8,15 @@
  */
 
 import { createRequestBuilder, type RequestBuilder } from './builder'
+import type { RedactOptions } from './redact'
+
+/**
+ * Failure-diagnostics mode (DESIGN.md §4). `true` is an alias for `'onFailure'`.
+ * - `'onFailure'` — dump the request/response only when an assertion throws.
+ * - `'always'`    — dump every request after it completes.
+ * Default is off (no dump). May also be enabled via the `APITEST_DEBUG` env var.
+ */
+export type DebugMode = boolean | 'onFailure' | 'always'
 
 /** A header value is either a static string or a (sync or async) callable. */
 export type HeaderValue = string | (() => string | Promise<string>)
@@ -100,6 +109,21 @@ export interface ClientOptions {
    * Use for request signing (HMAC/SigV4), correlation IDs, etc.
    */
   beforeRequest?: (req: OutgoingRequest) => void | Promise<void>
+  /**
+   * Failure diagnostics (DESIGN.md §4). When enabled, a compact request +
+   * response block is written to **stderr**. `true` ⇒ `'onFailure'`. Off by
+   * default. The `APITEST_DEBUG` env var (truthy) also enables it
+   * (`APITEST_DEBUG=always` ⇒ `'always'`, otherwise `'onFailure'`); a per-request
+   * `.debug()` forces `'always'` for that one request.
+   */
+  debug?: DebugMode
+  /**
+   * Secret redaction (DESIGN.md §4/§8). Sensitive header values are always
+   * masked in debug dumps (built-in defaults merged with `redact.headers`).
+   * `redact.bodyKeys` lists JSON property names whose values are masked both in
+   * debug bodies and in assertion diffs (and thus in JUnit / annotations).
+   */
+  redact?: RedactOptions
 }
 
 /** Options for a single low-level request. */
@@ -111,6 +135,13 @@ export interface RequestOptions {
   /** Per-request timeout override (defaults to the client's `timeoutMs`). */
   timeoutMs?: number
   signal?: AbortSignal
+  /**
+   * Invoked with the fully-resolved {@link OutgoingRequest} immediately before
+   * `fetch` (after headers + cookies + `beforeRequest` are applied), on every
+   * attempt. The builder uses this to capture the ACTUAL request sent for a
+   * debug dump. Read-only by contract (do not mutate — use `beforeRequest`).
+   */
+  onSend?: (meta: OutgoingRequest) => void
 }
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS'
@@ -127,6 +158,14 @@ export interface Client {
    * client was created with `cookies: true`; otherwise it is a no-op empty jar.
    */
   readonly cookies: CookieJar
+  /**
+   * Resolved debug mode for this client (factory `debug` ⇒ env var fallback),
+   * or `undefined` when diagnostics are off. The builder reads this (and a
+   * per-request `.debug()`) to decide whether/when to dump.
+   */
+  readonly debug: 'onFailure' | 'always' | undefined
+  /** Carried redaction options (header defaults + bodyKeys), or undefined. */
+  readonly redact: RedactOptions | undefined
   /** Begin a GET request to `path`; returns a fluent, awaitable builder. */
   get<T = unknown>(path: string): RequestBuilder<T>
   /** Begin a POST request to `path`; returns a fluent, awaitable builder. */
@@ -267,6 +306,28 @@ function serializeCookieHeader(jar: Map<string, string>): string | undefined {
   return [...jar.entries()].map(([name, value]) => `${name}=${value}`).join('; ')
 }
 
+/**
+ * Resolve the effective debug mode from the factory option and the
+ * `APITEST_DEBUG` env var. The factory option (when set) wins; `true` aliases to
+ * `'onFailure'`. With no factory option a truthy `APITEST_DEBUG` enables it
+ * (`'always'` when the env value is exactly `always`, else `'onFailure'`).
+ * Returns `undefined` when diagnostics are off.
+ */
+export function resolveDebugMode(
+  option: DebugMode | undefined,
+  env: string | undefined = process.env.APITEST_DEBUG,
+): 'onFailure' | 'always' | undefined {
+  if (option !== undefined) {
+    if (option === false) return undefined
+    if (option === true) return 'onFailure'
+    return option
+  }
+  if (env && env !== '0' && env.toLowerCase() !== 'false') {
+    return env.toLowerCase() === 'always' ? 'always' : 'onFailure'
+  }
+  return undefined
+}
+
 export function createClient(opts: ClientOptions): Client {
   const baseUrl = opts.baseUrl
   const factoryHeaders = opts.headers
@@ -274,6 +335,8 @@ export function createClient(opts: ClientOptions): Client {
   const defaultRetry = opts.retry
   const cookiesEnabled = opts.cookies ?? false
   const beforeRequest = opts.beforeRequest
+  const debugMode = resolveDebugMode(opts.debug)
+  const redact = opts.redact
 
   // In-memory, per-client cookie jar (only used when `cookies: true`).
   const jar = new Map<string, string>()
@@ -293,6 +356,8 @@ export function createClient(opts: ClientOptions): Client {
     timeoutMs: defaultTimeoutMs,
     retry: defaultRetry,
     cookies: cookieJar,
+    debug: debugMode,
+    redact,
 
     get(path) {
       return createRequestBuilder(client, 'GET', path)
@@ -350,6 +415,9 @@ export function createClient(opts: ClientOptions): Client {
         const signal =
           requestOpts.signal ?? (timeoutMs === 0 ? undefined : AbortSignal.timeout(timeoutMs))
 
+        // Capture the ACTUAL request sent (post-hook) for debug diagnostics.
+        requestOpts.onSend?.(outgoing)
+
         const res = await fetch(finalUrl, {
           method,
           headers: outgoing.headers,
@@ -364,6 +432,9 @@ export function createClient(opts: ClientOptions): Client {
       // A timeout of 0 disables the signal (escape hatch); otherwise apply it.
       const signal =
         requestOpts.signal ?? (timeoutMs === 0 ? undefined : AbortSignal.timeout(timeoutMs))
+
+      // Capture the ACTUAL request sent for debug diagnostics.
+      requestOpts.onSend?.({ method, url, headers, body: requestOpts.body ?? null })
 
       const res = await fetch(url, {
         method,

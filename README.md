@@ -492,6 +492,75 @@ const posts = await client
 
 ---
 
+## Debugging & redaction
+
+When a request misbehaves, turn on **failure diagnostics** to print a compact
+request + response block to **stderr**. It is **off by default** and never
+changes behaviour.
+
+```ts
+// Per-request: force a dump for just this one (always dumps).
+await client.get('/users/1').debug().expectStatus(200)
+
+// Per-client: dump on assertion failure, or every request.
+const client = createClient({ baseUrl, debug: 'onFailure' }) // or 'always' / true
+```
+
+Or enable it from the environment without touching code:
+
+```bash
+APITEST_DEBUG=1 bun test          # 'onFailure' (dump only on a failed assertion)
+APITEST_DEBUG=always bun test     # dump every request
+```
+
+A dump reflects the **actual request sent** (final headers incl. the cookie jar
+and any `beforeRequest` mutations). Sensitive headers are masked automatically:
+
+```
+── apitest ─────────────────────────────
+→ GET https://api.example.com/users/1
+  headers: { authorization: "***", accept: "application/json" }
+  body: {"name":"Ada"}
+← 404  (123ms)
+  headers: { content-type: "application/json", set-cookie: "***" }
+  body: {"data":1,"token":"***"}
+─────────────────────────────────────────
+```
+
+### Redaction
+
+`redact` masks secrets on **two** surfaces — debug dumps **and** assertion diffs
+(which flow into the console, JUnit, and GitHub annotations):
+
+```ts
+const client = createClient({
+  baseUrl,
+  redact: { bodyKeys: ['password', 'token'] },  // mask these JSON field values
+  // redact.headers: [...] adds to the built-in sensitive-header set
+})
+```
+
+- **Header values** for a built-in default set —
+  `authorization, cookie, set-cookie, proxy-authorization, x-api-key,
+  x-auth-token, api-key` (case-insensitive) — are **always masked in debug
+  dumps**, even with no `redact` option, so auth never leaks. `redact.headers`
+  adds more.
+- **`bodyKeys`** values are masked in debug bodies (JSON, best-effort) and in
+  the structured diff of `.expectJson()` / `.expectJsonStrict()`. A failing
+  diff for a redacted key shows `"***"` instead of the secret, while other
+  fields still show their real values:
+
+  ```
+  GET https://api.example.com/session — JSON body did not match (strict) (2 differences):
+    • token  expected "***" received "***"
+    • role  expected "admin" received "user"
+  ```
+
+`redactHeaders(headers, names)` and `redactBodyKeys(value, keys)` are exported as
+pure helpers if you need them directly.
+
+---
+
 ## Retry semantics
 
 Retry is **opt-in** (off by default) and handles transient failures *before*

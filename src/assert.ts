@@ -21,6 +21,12 @@ export class AssertionError extends Error {
 export interface AssertContext {
   method: string
   url: string
+  /**
+   * JSON property names whose values must be masked (`"***"`) in a structured
+   * diff, so a redacted field never leaks through the console / JUnit /
+   * annotations (DESIGN.md §4/§8). Threaded from the client's `redact.bodyKeys`.
+   */
+  redactKeys?: string[]
 }
 
 /**
@@ -366,25 +372,58 @@ function diffValue(value: unknown): string {
   return preview(value, VALUE_MAX)
 }
 
+/** The mask rendered for a redacted diff value (matches `redact.REDACTION_MASK`). */
+const REDACT_MASK = '"***"'
+
+/**
+ * The final path segment's object key, or `undefined` when the path is empty or
+ * ends in an array index. Used to decide whether a diff value is redacted: a
+ * path like `user.token` → `token`; `items[2]` → `undefined`.
+ */
+function finalKey(path: string): string | undefined {
+  if (path === '') return undefined
+  // Trailing array index (`…[2]`) has no object key to match.
+  if (/\]$/.test(path)) return undefined
+  const lastDot = path.lastIndexOf('.')
+  const seg = lastDot === -1 ? path : path.slice(lastDot + 1)
+  // A leading object key on an indexed parent could still be plain (`a[0].b`);
+  // strip any index prefix defensively, though `seg` here is already a key.
+  return seg
+}
+
+/** Whether this diff's value should be masked (its final key is a redact key). */
+function isRedacted(diff: Difference, redactKeys: Set<string>): boolean {
+  if (redactKeys.size === 0) return false
+  const key = finalKey(diff.path)
+  return key !== undefined && redactKeys.has(key)
+}
+
 /** Render one difference as a `path  expected … received …` line. */
-function formatDifference(diff: Difference): string {
+function formatDifference(diff: Difference, redactKeys: Set<string>): string {
   const label = diff.path === '' ? '(root)' : diff.path
+  const redacted = isRedacted(diff, redactKeys)
+  const val = (v: unknown) => (redacted ? REDACT_MASK : diffValue(v))
   switch (diff.kind) {
     case 'missing':
       return `${label}  missing (expected key not present)`
     case 'extra':
-      return `${label}  unexpected key (received ${diffValue(diff.actual)})`
+      return `${label}  unexpected key (received ${val(diff.actual)})`
     case 'length':
+      // Lengths are not secret values; show them even for a redacted key.
       return `${label}  array length expected ${diff.expected} received ${diff.actual}`
     case 'type':
     case 'value':
-      return `${label}  expected ${diffValue(diff.expected)} received ${diffValue(diff.actual)}`
+      return `${label}  expected ${val(diff.expected)} received ${val(diff.actual)}`
   }
 }
 
 /** Build the multi-line diff message body (cap applied) for a list of diffs. */
-function formatDiffMessage(diffs: Difference[], headline: string): string {
-  const lines = diffs.slice(0, DIFF_CAP).map((d) => `  • ${formatDifference(d)}`)
+function formatDiffMessage(
+  diffs: Difference[],
+  headline: string,
+  redactKeys: Set<string>,
+): string {
+  const lines = diffs.slice(0, DIFF_CAP).map((d) => `  • ${formatDifference(d, redactKeys)}`)
   if (diffs.length > DIFF_CAP) {
     lines.push(`  … and ${diffs.length - DIFF_CAP} more`)
   }
@@ -396,8 +435,9 @@ function formatDiffMessage(diffs: Difference[], headline: string): string {
 export function assertJson(ctx: AssertContext, partial: unknown, body: unknown): void {
   const diffs = diffJson(partial, body, 'subset')
   if (diffs.length > 0) {
+    const redactKeys = new Set(ctx.redactKeys ?? [])
     throw new AssertionError(
-      `${prefix(ctx)}${formatDiffMessage(diffs, 'JSON body did not match (subset)')}`,
+      `${prefix(ctx)}${formatDiffMessage(diffs, 'JSON body did not match (subset)', redactKeys)}`,
     )
   }
 }
@@ -406,8 +446,9 @@ export function assertJson(ctx: AssertContext, partial: unknown, body: unknown):
 export function assertJsonStrict(ctx: AssertContext, expected: unknown, body: unknown): void {
   const diffs = diffJson(expected, body, 'strict')
   if (diffs.length > 0) {
+    const redactKeys = new Set(ctx.redactKeys ?? [])
     throw new AssertionError(
-      `${prefix(ctx)}${formatDiffMessage(diffs, 'JSON body did not match (strict)')}`,
+      `${prefix(ctx)}${formatDiffMessage(diffs, 'JSON body did not match (strict)', redactKeys)}`,
     )
   }
 }

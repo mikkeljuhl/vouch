@@ -100,6 +100,8 @@ interface ClientOptions {
   retry?: { times: number; when?: (res: Response) => boolean }  // default
   cookies?: boolean               // opt-in in-memory session jar (default false)
   beforeRequest?: (req: OutgoingRequest) => void | Promise<void>  // per-attempt mutate hook
+  debug?: boolean | 'onFailure' | 'always'  // failure diagnostics (default off)
+  redact?: { headers?: string[]; bodyKeys?: string[] }  // secret redaction
 }
 
 function createClient(opts: ClientOptions): Client
@@ -168,6 +170,53 @@ correlation IDs, etc. Running per attempt means retries **re-sign** correctly.
 > A `ReadableStream` body is **not re-readable**, so stream bodies cannot be
 > signed from their content.
 
+### Failure diagnostics (`debug`) & secret redaction (`redact`)
+
+**Debug dumps.** `debug?: boolean | 'onFailure' | 'always'` (default off; `true`
+⇒ `'onFailure'`) prints a compact **request + response** block to **stderr**:
+
+- `'onFailure'` — dump only when an assertion throws (then the original
+  `AssertionError` is rethrown unchanged).
+- `'always'` — dump every request after it completes.
+
+The env var **`APITEST_DEBUG`** (truthy) also enables it
+(`APITEST_DEBUG=always` ⇒ `'always'`, otherwise `'onFailure'`); a per-request
+**`.debug()`** forces `'always'` for that one request regardless of the client
+setting. The dump reflects the **actual request sent** — final headers including
+the cookie jar and `beforeRequest` mutations — captured via an internal
+`onSend(meta: OutgoingRequest)` hook that `_request` invokes immediately before
+`fetch`. Bodies are truncated to ~2KB.
+
+```
+── apitest ─────────────────────────────
+→ GET https://api.example.com/users/1
+  headers: { authorization: "***", accept: "application/json" }
+  body: {"name":"Ada"}
+← 404  (123ms)
+  headers: { content-type: "application/json", set-cookie: "***" }
+  body: {"data":1,"token":"***"}
+─────────────────────────────────────────
+```
+
+**Redaction.** `redact?: { headers?: string[]; bodyKeys?: string[] }` protects
+two leak surfaces:
+
+1. **Debug dumps** — sensitive header *values* are masked (`***`). The masked
+   set is a built-in default (case-insensitive) — `authorization, cookie,
+   set-cookie, proxy-authorization, x-api-key, x-auth-token, api-key` — merged
+   with any `redact.headers`. `bodyKeys` values are masked in request/response
+   bodies when they parse as JSON (best-effort; non-JSON left as-is).
+2. **Assertion diffs** — `bodyKeys` are threaded into the matchers via
+   `AssertContext.redactKeys`, so the structured JSON diff renders `"***"` for
+   any path whose final key is a body key. Because the console / JUnit
+   `<failure>` / GitHub annotations all derive from the `AssertionError` message
+   (§8), redaction **propagates automatically** into reporting.
+
+With no `redact` option the **default sensitive HEADERS are still masked in debug
+dumps** (so auth never leaks), but **no bodyKeys** are masked (we can't guess
+them). Pure, exported helpers `redactHeaders(headers, names)` and
+`redactBodyKeys(value, keys)` back this and are independently testable.
+
 ### Authoring example
 
 ```ts
@@ -222,6 +271,7 @@ client.get<T>(path) / .post / .put / .patch / .delete
   .file(name, blob, filename?)// append a file part to the multipart FormData
   .timeout(ms)
   .retry({ times, when })
+  .debug()                    // force a failure-diagnostics dump for this request
   .expectStatus(code)
   .expectHeader(name, value | RegExp)
   .expectJson(partial)        // subset match
@@ -414,6 +464,12 @@ we ever publish for non-TS-aware consumers (deferred, §10).
     reconstructs the console fullName from `classname` + `name` to match, with
     fallbacks (unique title-suffix match; single-failure/single-message), and
     leaves a testcase type-only if it can't match confidently (never crashes).
+- **Secret redaction propagates into reporting.** Because the annotations and
+  the enriched JUnit `<failure>` bodies are derived from the `AssertionError`
+  message, threading `redact.bodyKeys` into the structured diff (via
+  `AssertContext.redactKeys`, §4) means a redacted field shows `"***"` rather
+  than its value everywhere downstream — console log, JUnit artifact, and GitHub
+  annotations — with no per-surface work.
 - A packaged reusable action stays deferred (§9); CI wires the steps directly.
 
 ---
