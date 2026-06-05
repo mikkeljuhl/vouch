@@ -1,7 +1,8 @@
 name: CI
 
-# Repo-local CI for the framework's own dogfood suite (DESIGN.md §7/§9: a
-# packaged reusable workflow/action is deferred — this runs OUR tests only).
+# Repo-local CI for the framework's own dogfood suite. Runs under Bun (the
+# default runner). A packaged reusable workflow/action stays deferred
+# (DESIGN.md §10) — this runs OUR tests only.
 on:
   pull_request:
 
@@ -12,39 +13,26 @@ permissions:
 
 jobs:
   test:
-    name: Test (Node ${{ matrix.node-version }})
+    name: Test (Bun)
     runs-on: ubuntu-latest
-    strategy:
-      # Test every supported LTS independently; don't cancel the others if one fails.
-      fail-fast: false
-      matrix:
-        node-version: [22, 24]
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v5
+      - uses: oven-sh/setup-bun@v2
         with:
-          node-version: ${{ matrix.node-version }}
-          cache: npm
+          bun-version: latest
 
       - name: Install
-        run: npm ci
+        run: bun install --frozen-lockfile
 
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Build
-        run: npm run build
-
-      # GITHUB_ACTIONS=true is set automatically, so vitest.config.ts enables the
-      # github-actions (inline annotations) + json reporters here. The suite hits
-      # a live public API (jsonplaceholder); test-level retry:1 absorbs transient
-      # flake.
+      # The suite hits a live public API (jsonplaceholder). Emit JUnit XML for
+      # the summary/annotation step.
       - name: Test
-        run: npm test
+        run: bun test --reporter=junit --reporter-outfile=reports/junit.xml
 
-      # Render the job-summary table even when tests fail (the json report is
-      # written regardless). The job still fails because the Test step failed.
-      - name: Job summary
+      # Parse the JUnit XML into inline annotations + a Markdown job summary.
+      # Runs even when tests fail (the report is written regardless); the job
+      # still fails because the Test step failed.
+      - name: Job summary + annotations
         if: always()
-        run: node scripts/ci-summary.mjs
+        run: bun scripts/ci-summary.mjs reports/junit.xml

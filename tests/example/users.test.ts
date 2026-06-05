@@ -11,7 +11,7 @@
  * patterns rather than just exercising the API.
  */
 
-import { beforeAll, describe, expect, test } from 'vitest'
+import { beforeAll, describe, expect, test } from 'bun:test'
 import { createClient, type Client } from '../../src/index'
 import type { Post, User } from './types'
 

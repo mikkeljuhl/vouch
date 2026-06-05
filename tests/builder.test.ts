@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from 'bun:test'
 import { createClient } from '../src/client'
 
 /** Build a JSON Response with the given body/status/headers. */
@@ -10,15 +10,18 @@ function jsonResponse(body: unknown, status = 200, headers: Record<string, strin
 }
 
 describe('RequestBuilder (mocked fetch)', () => {
-  let fetchMock: ReturnType<typeof vi.fn>
+  // Save the real fetch once; restore after each test so the stubbed fetch never
+  // leaks into the live `tests/example` suite (restoration is essential).
+  const realFetch = globalThis.fetch
+  let fetchMock: ReturnType<typeof mock>
 
   beforeEach(() => {
-    fetchMock = vi.fn(async () => jsonResponse({ ok: true }))
-    vi.stubGlobal('fetch', fetchMock)
+    fetchMock = mock(async () => jsonResponse({ ok: true }))
+    globalThis.fetch = fetchMock as unknown as typeof fetch
   })
 
   afterEach(() => {
-    vi.unstubAllGlobals()
+    globalThis.fetch = realFetch
   })
 
   const client = () => createClient({ baseUrl: 'https://api.example.com' })
@@ -51,56 +54,56 @@ describe('RequestBuilder (mocked fetch)', () => {
   describe('expectStatus', () => {
     test('passes on match', async () => {
       fetchMock.mockResolvedValueOnce(jsonResponse({}, 201))
-      await expect(client().post('/x').expectStatus(201)).resolves.toBeDefined()
+      await expect(client().post('/x').expectStatus(201).send()).resolves.toBeDefined()
     })
 
     test('throws on mismatch', async () => {
       fetchMock.mockResolvedValueOnce(jsonResponse({}, 200))
-      await expect(client().get('/x').expectStatus(404)).rejects.toThrow()
+      await expect(client().get('/x').expectStatus(404).send()).rejects.toThrow()
     })
   })
 
   describe('expectHeader', () => {
     test('string match passes and fails', async () => {
       fetchMock.mockResolvedValue(jsonResponse({}, 200, { 'x-flavor': 'vanilla' }))
-      await expect(client().get('/x').expectHeader('x-flavor', 'vanilla')).resolves.toBeDefined()
-      await expect(client().get('/x').expectHeader('x-flavor', 'chocolate')).rejects.toThrow()
+      await expect(client().get('/x').expectHeader('x-flavor', 'vanilla').send()).resolves.toBeDefined()
+      await expect(client().get('/x').expectHeader('x-flavor', 'chocolate').send()).rejects.toThrow()
     })
 
     test('RegExp match passes and fails (case-insensitive lookup)', async () => {
       fetchMock.mockResolvedValue(jsonResponse({}, 200, { 'Content-Type': 'application/json; charset=utf-8' }))
       // lookup by differing case proves Headers is case-insensitive
-      await expect(client().get('/x').expectHeader('content-type', /json/)).resolves.toBeDefined()
-      await expect(client().get('/x').expectHeader('content-type', /xml/)).rejects.toThrow()
+      await expect(client().get('/x').expectHeader('content-type', /json/).send()).resolves.toBeDefined()
+      await expect(client().get('/x').expectHeader('content-type', /xml/).send()).rejects.toThrow()
     })
   })
 
   describe('expectJson (partial / subset)', () => {
     test('passes on a subset; extra keys in body allowed', async () => {
       fetchMock.mockResolvedValueOnce(jsonResponse({ id: 1, name: 'Ada', email: 'a@ex.com' }))
-      await expect(client().get('/u').expectJson({ name: 'Ada' })).resolves.toBeDefined()
+      await expect(client().get('/u').expectJson({ name: 'Ada' }).send()).resolves.toBeDefined()
     })
 
     test('throws on a missing key', async () => {
       fetchMock.mockResolvedValueOnce(jsonResponse({ id: 1 }))
-      await expect(client().get('/u').expectJson({ name: 'Ada' })).rejects.toThrow()
+      await expect(client().get('/u').expectJson({ name: 'Ada' }).send()).rejects.toThrow()
     })
 
     test('throws on a wrong value', async () => {
       fetchMock.mockResolvedValueOnce(jsonResponse({ name: 'Bob' }))
-      await expect(client().get('/u').expectJson({ name: 'Ada' })).rejects.toThrow()
+      await expect(client().get('/u').expectJson({ name: 'Ada' }).send()).rejects.toThrow()
     })
   })
 
   describe('expectJsonStrict (deep equal)', () => {
     test('passes on exact match', async () => {
       fetchMock.mockResolvedValueOnce(jsonResponse({ id: 1, name: 'Ada' }))
-      await expect(client().get('/u').expectJsonStrict({ id: 1, name: 'Ada' })).resolves.toBeDefined()
+      await expect(client().get('/u').expectJsonStrict({ id: 1, name: 'Ada' }).send()).resolves.toBeDefined()
     })
 
     test('throws when the body has extra keys', async () => {
       fetchMock.mockResolvedValueOnce(jsonResponse({ id: 1, name: 'Ada', extra: true }))
-      await expect(client().get('/u').expectJsonStrict({ id: 1, name: 'Ada' })).rejects.toThrow()
+      await expect(client().get('/u').expectJsonStrict({ id: 1, name: 'Ada' }).send()).rejects.toThrow()
     })
   })
 
@@ -109,14 +112,14 @@ describe('RequestBuilder (mocked fetch)', () => {
 
     // A RegExp whose .test is spied: if the later expectHeader ran, the spy fires.
     const laterPattern = /json/
-    const testSpy = vi.spyOn(laterPattern, 'test')
+    const testSpy = spyOn(laterPattern, 'test')
 
     const builder = client()
       .get('/u')
       .expectStatus(200) // fails first
       .expectHeader('content-type', laterPattern) // would pass, must NOT run
 
-    await expect(builder).rejects.toThrow()
+    await expect(builder.send()).rejects.toThrow()
     expect(testSpy).not.toHaveBeenCalled()
   })
 
@@ -124,7 +127,7 @@ describe('RequestBuilder (mocked fetch)', () => {
     // status mismatch AND json mismatch both present; the status error message wins.
     fetchMock.mockResolvedValueOnce(jsonResponse({ name: 'Bob' }, 500))
     await expect(
-      client().get('/u').expectStatus(200).expectJson({ name: 'Ada' }),
+      client().get('/u').expectStatus(200).expectJson({ name: 'Ada' }).send(),
     ).rejects.toThrow(/200/)
   })
 
@@ -202,15 +205,16 @@ describe('RequestBuilder (mocked fetch)', () => {
  * override, and that a serialized body is resent verbatim on each attempt.
  */
 describe('RequestBuilder retry (mocked fetch)', () => {
-  let fetchMock: ReturnType<typeof vi.fn>
+  const realFetch = globalThis.fetch
+  let fetchMock: ReturnType<typeof mock>
 
   beforeEach(() => {
-    fetchMock = vi.fn(async () => jsonResponse({ ok: true }))
-    vi.stubGlobal('fetch', fetchMock)
+    fetchMock = mock(async () => jsonResponse({ ok: true }))
+    globalThis.fetch = fetchMock as unknown as typeof fetch
   })
 
   afterEach(() => {
-    vi.unstubAllGlobals()
+    globalThis.fetch = realFetch
   })
 
   const client = () => createClient({ baseUrl: 'https://api.example.com' })
@@ -270,14 +274,14 @@ describe('RequestBuilder retry (mocked fetch)', () => {
     const err = new Error('network down')
     fetchMock.mockRejectedValue(err)
 
-    await expect(client().get('/x').retry({ times: 1 })).rejects.toThrow('network down')
+    await expect(client().get('/x').retry({ times: 1 }).send()).rejects.toThrow('network down')
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
   test('exhausted 5xx: always 500, times:2 → 3 calls, expectStatus(200) fails', async () => {
     fetchMock.mockResolvedValue(jsonResponse({}, 500))
 
-    await expect(client().get('/x').retry({ times: 2 }).expectStatus(200)).rejects.toThrow(/200/)
+    await expect(client().get('/x').retry({ times: 2 }).expectStatus(200).send()).rejects.toThrow(/200/)
     expect(fetchMock).toHaveBeenCalledTimes(3)
   })
 
@@ -326,7 +330,8 @@ describe('RequestBuilder retry (mocked fetch)', () => {
 /**
  * Live integration tests against a public API (jsonplaceholder). These run by
  * default; if the network is unavailable they fail loudly rather than silently
- * passing. Run `vitest --exclude '**\/*.integration*'`-style filtering offline.
+ * passing. Filter them out offline with `bun test --test-name-pattern` (or run
+ * only the mocked suites).
  */
 describe('RequestBuilder (live: jsonplaceholder)', () => {
   const live = createClient({ baseUrl: 'https://jsonplaceholder.typicode.com', timeoutMs: 15_000 })
