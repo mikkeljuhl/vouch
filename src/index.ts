@@ -12,3 +12,4 @@ export type {
 export type { RequestBuilder, ApiResponse } from './builder'
 export { AssertionError } from './assert'
 export type { AssertContext } from './assert'
+export { fixture } from './fixtures'

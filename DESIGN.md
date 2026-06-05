@@ -57,7 +57,6 @@ everything: (1) a nice API, (2) minimal CI setup, (3) minimal local setup.
 - A dedicated auth concept (auth is just a header — see [§4](#4-the-client-factory)).
 - **Native per-language SDKs** (one shared language only).
 - JSON-schema and latency/SLA assertions.
-- Form/multipart/binary request bodies.
 - A declarative format or named-variable template store.
 
 ---
@@ -157,7 +156,11 @@ describe('users', () => {
 client.get<T>(path) / .post / .put / .patch / .delete
   .query(record)
   .headers(record)            // values may also be callables
-  .json(body)
+  .json(body)                 // JSON body + content-type: application/json
+  .body(raw)                  // raw BodyInit escape hatch; no content-type set
+  .form(fields)               // URLSearchParams; fetch sets urlencoded type
+  .multipart(fields?)         // start/extend a multipart FormData (string fields)
+  .file(name, blob, filename?)// append a file part to the multipart FormData
   .timeout(ms)
   .retry({ times, when })
   .expectStatus(code)
@@ -170,6 +173,41 @@ client.get<T>(path) / .post / .put / .patch / .delete
 The lifecycle (`test`/`describe`/`beforeAll`) comes from the **host runner**
 (`bun:test` by default, or `vitest`). The framework provides only `createClient`,
 the builder, and the assertions.
+
+### File uploads & fixtures
+
+The body methods cover the common upload shapes on top of native `fetch`:
+
+- `.json(body)` serializes JSON and sets `content-type: application/json`.
+- `.form(fields)` sends a `URLSearchParams` (fetch sets
+  `application/x-www-form-urlencoded`).
+- `.multipart(fields?)` / `.file(name, blob, filename?)` build a single shared
+  `FormData` — `.multipart()` then one or more `.file()` calls accumulate into
+  the same form — and let fetch set `multipart/form-data` with the correct
+  boundary. `.file()` auto-creates the form if `.multipart()` was not called.
+- `.body(raw)` is the raw escape hatch for any `BodyInit`
+  (string/Blob/FormData/URLSearchParams/ArrayBuffer/ReadableStream); it sets no
+  content-type, so the caller supplies one via `.headers()` if needed.
+
+**Content-type handling.** The framework tracks an *auto* content-type separately
+from user `.headers()`. `.json()` sets it; `.form()/.multipart()/.file()/.body()`
+clear it so a stale `application/json` can never leak onto a multipart body and
+break its boundary. At request time the auto value is merged *under* user headers
+(user `.headers()` wins). Body setters are last-writer-wins: `.json()` after
+`.multipart()` overwrites the form (and clears the shared `FormData`).
+
+**Fixtures.** `fixture(import.meta.url, './fixtures/sample.zip', type?)` reads a
+file relative to the calling test and returns a `Blob`, using runtime builtins
+(`node:fs`/`node:url`) so it works under Bun and Node alike. Resolving relative to
+`import.meta.url` (not cwd) makes fixtures resolve identically locally and inside
+the Docker image — **keep fixtures under `tests/`** so they travel into the image
+(the `tests/` dir is copied/mounted; `.dockerignore` must not exclude
+`tests/fixtures`).
+
+**ReadableStream + retry caveat.** A `ReadableStream` body is consumed by the
+first fetch and cannot be replayed. If retry is enabled (`times > 0`) with a
+stream body, the builder throws early with a clear message; use a `Blob`/`Buffer`
+(re-serialized per attempt) or set `.retry({ times: 0 })`.
 
 ---
 
@@ -267,7 +305,6 @@ Out of scope now, designed not to be precluded:
 - **Packaged GitHub Action / reusable workflow.**
 - **Bundled build for non-TS-aware consumers** (currently shipped as TS source).
 - **JSON-schema & latency assertions** — `.expectSchema(...)`, `.expectUnder(ms)`.
-- **Form/multipart/raw bodies** — file uploads, urlencoded, binary.
 - **Injectable matcher hook** for runner-native diffs.
 - **Named variable store** / declarative format.
 - **Registry publishing** — once the API stabilizes.
