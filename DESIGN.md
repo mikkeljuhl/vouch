@@ -42,7 +42,7 @@ runs against a public sample API so CI continuously self-tests the framework.
 |---|---|
 | **Approach** | Custom fluent DSL over an existing engine (not a from-scratch runner) |
 | **Engine** | Vitest |
-| **Language** | TypeScript / Node 20+ |
+| **Language** | TypeScript / Node 24+ |
 | **Authoring** | Code — TS test files using a fluent chain builder |
 | **Target** | Already-running deployed env (base URL + headers) |
 | **Client** | `createClient({ baseUrl, headers, ...defaults })` factory; instance exposes the builder |
@@ -239,7 +239,7 @@ Out of MVP scope, designed not to be precluded:
 
 ### Phase 0 — Project scaffold
 - `git init`; `package.json`, `tsconfig.json`, `tsup.config.ts`, `.gitignore`.
-- Add Vitest + tsup dev deps; Node 20+ engines field.
+- Add Vitest + tsup dev deps; Node 24+ engines field.
 - **Exit:** `npm run build` and `npm test` (no tests yet) run clean.
 
 ### Phase 1 — Client factory
