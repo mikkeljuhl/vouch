@@ -51,6 +51,29 @@ export interface RequestBuilder<T = unknown> extends PromiseLike<ApiResponse<T>>
   headers(record: Record<string, HeaderValue>): this
   /** Set a JSON body and `content-type: application/json`. */
   json(body: unknown): this
+  /**
+   * Raw body escape hatch: set the request body to any fetch `BodyInit`
+   * (string/Blob/FormData/URLSearchParams/ArrayBuffer/ReadableStream). Does NOT
+   * set a content-type — set one via `.headers()` if the endpoint needs it.
+   */
+  body(raw: NonNullable<RequestInit['body']>): this
+  /**
+   * Send a URL-encoded form body. Sets the body to a `URLSearchParams(fields)`;
+   * fetch auto-sets `content-type: application/x-www-form-urlencoded`.
+   */
+  form(fields: Record<string, string>): this
+  /**
+   * Start (or extend) a `multipart/form-data` body, appending the given string
+   * fields. fetch sets the `multipart/form-data; boundary=…` content-type itself.
+   * Call `.file()` to add file parts to the same form.
+   */
+  multipart(fields?: Record<string, string>): this
+  /**
+   * Append a file part to the multipart form (auto-creating it if `.multipart()`
+   * was not called first). `filename` defaults to the `Blob`'s `name` (when it is
+   * a `File`) else `name`.
+   */
+  file(name: string, file: Blob, filename?: string): this
   /** Override the per-request timeout (ms). */
   timeout(ms: number): this
   /** Store a retry policy for this request (execution wired in Phase 3). */
@@ -102,6 +125,14 @@ export function createRequestBuilder<T>(
   let query: Record<string, string | number | boolean | null | undefined> | undefined
   let headers: Record<string, HeaderValue> | undefined
   let body: RequestInit['body'] | undefined
+  // Content-type the framework auto-injects for the chosen body (e.g. `.json()`).
+  // Kept separate from user `.headers()` so switching body kinds (json →
+  // multipart/form/raw) never leaks a stale content-type that would break a
+  // multipart boundary. Merged at request time, with user headers winning.
+  let autoContentType: string | undefined
+  // The shared multipart FormData so `.multipart()` then `.file()` (and repeated
+  // `.file()`) accumulate into the SAME instance.
+  let form: FormData | undefined
   let timeoutMs: number | undefined
   // Stored for Phase 3; intentionally unused in execution for now.
   let retryOptions: RetryOptions | undefined
@@ -122,7 +153,49 @@ export function createRequestBuilder<T>(
 
     json(value) {
       body = JSON.stringify(value)
-      headers = { 'content-type': 'application/json', ...headers }
+      autoContentType = 'application/json'
+      // Switching to a JSON body invalidates any in-progress multipart form
+      // (last-body-setter-wins). Drop it so a later `.file()` starts fresh.
+      form = undefined
+      return this
+    },
+
+    body(raw) {
+      body = raw
+      // Raw escape hatch: the caller owns the content-type (via `.headers()`).
+      autoContentType = undefined
+      form = undefined
+      return this
+    },
+
+    form(fields) {
+      body = new URLSearchParams(fields)
+      // fetch auto-sets application/x-www-form-urlencoded for URLSearchParams.
+      autoContentType = undefined
+      form = undefined
+      return this
+    },
+
+    multipart(fields) {
+      // Extend an existing form (e.g. after `.file()`), else start one.
+      form ??= new FormData()
+      if (fields) {
+        for (const [key, value] of Object.entries(fields)) {
+          form.append(key, value)
+        }
+      }
+      body = form
+      // fetch sets multipart/form-data with the correct boundary itself.
+      autoContentType = undefined
+      return this
+    },
+
+    file(name, file, filename) {
+      form ??= new FormData()
+      const effectiveName = filename ?? (file as File).name ?? name
+      form.append(name, file, effectiveName)
+      body = form
+      autoContentType = undefined
       return this
     },
 
@@ -207,6 +280,22 @@ export function createRequestBuilder<T>(
     const times = effective?.times ?? 0
     const when = effective?.when
 
+    // A ReadableStream body is consumed by the first fetch and cannot be replayed
+    // on a subsequent attempt. Blob/FormData/URLSearchParams/string are
+    // re-serialized by fetch per attempt, so only streams are unsafe to retry.
+    if (times > 0 && body instanceof ReadableStream) {
+      throw new Error(
+        'apitest: a ReadableStream body cannot be retried; set .retry({times:0}) or use a Blob/Buffer',
+      )
+    }
+
+    // Merge the framework's auto content-type under the user's `.headers()` so a
+    // user-supplied content-type always wins; omit it entirely for body kinds
+    // (form/multipart) where fetch must set the boundary itself.
+    const mergedHeaders = autoContentType
+      ? { 'content-type': autoContentType, ...headers }
+      : headers
+
     let lastError: unknown
     let lastResponse: Response | undefined
 
@@ -215,7 +304,7 @@ export function createRequestBuilder<T>(
       try {
         const res = await client._request(method, path, {
           query,
-          headers,
+          headers: mergedHeaders,
           body,
           timeoutMs,
         })

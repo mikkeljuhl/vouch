@@ -213,6 +213,10 @@ until you `await` the builder (or call `.send()`).
 | `.query(record)` | Merge query params onto the URL (`null`/`undefined` skipped). |
 | `.headers(record)` | Add per-request headers (values may be callables); override factory headers. |
 | `.json(body)` | Set a JSON body and `content-type: application/json`. |
+| `.body(raw)` | Raw `BodyInit` escape hatch (string/Blob/FormData/URLSearchParams/ArrayBuffer/ReadableStream); sets no content-type. |
+| `.form(fields)` | URL-encoded body (`URLSearchParams`); fetch sets `application/x-www-form-urlencoded`. |
+| `.multipart(fields?)` | Start/extend a `multipart/form-data` body with string fields; fetch sets the boundary. |
+| `.file(name, blob, filename?)` | Append a file part to the multipart form (auto-creates it). |
 | `.timeout(ms)` | Override the per-request timeout. |
 | `.retry({ times, when })` | Set the retry policy for this request (overrides the factory default). |
 | `.expectStatus(code)` | Assert the response status equals `code`. |
@@ -246,6 +250,49 @@ interface ApiResponse<T> {
   raw: Response      // the underlying fetch Response (already consumed)
 }
 ```
+
+### File uploads
+
+Upload files and non-JSON bodies on top of native `fetch`. The `fixture()` helper
+reads a file **relative to the test module** (via `import.meta.url`, so it works
+regardless of cwd) and returns a `Blob`:
+
+```ts
+import { createClient, fixture } from '@your-org/apitest'
+
+// multipart/form-data: string fields + one or more files share one FormData.
+const zip = fixture(import.meta.url, './fixtures/sample.zip', 'application/zip')
+await client
+  .post('/upload')
+  .multipart({ note: 'nightly' })
+  .file('archive', zip, 'sample.zip') // filename defaults to the File/blob name, else the field name
+  .expectStatus(200)
+
+// application/x-www-form-urlencoded
+await client.post('/login').form({ user: 'ada', pass: 'secret' }).expectStatus(200)
+
+// raw escape hatch — you set the content-type yourself
+await client
+  .put('/raw')
+  .body(zip)
+  .headers({ 'content-type': 'application/zip' })
+  .expectStatus(200)
+```
+
+Notes:
+
+- **Content-type is handled for you.** `.json()` sets `application/json`;
+  `.form()/.multipart()/.file()` let fetch set the correct type (including the
+  multipart boundary); `.body()` sets none. A user `.headers()` content-type
+  always wins. Switching body kinds (e.g. `.json()` then `.multipart()`) never
+  leaks a stale content-type.
+- **Docker / fixtures.** Keep fixture files under the `tests/` directory so they
+  travel into the Docker image (it copies/mounts `tests/`); resolving via
+  `import.meta.url` then works identically locally and in the container. Ensure
+  `.dockerignore` does not exclude `tests/fixtures`.
+- **ReadableStream + retry.** A `ReadableStream` body can't be replayed, so
+  combining it with `.retry({ times > 0 })` throws early — use a `Blob`/`Buffer`
+  or `.retry({ times: 0 })`.
 
 ### Chaining
 
@@ -322,7 +369,6 @@ Out of MVP scope, designed not to be precluded (see [`DESIGN.md`](./DESIGN.md) �
 - **Bundled build for non-TS-aware consumers** — the package currently ships TS
   source; a compiled `dist/` is only needed for non-TS publishers.
 - **JSON-schema & latency/SLA assertions** — `.expectSchema(...)`, `.expectUnder(ms)`.
-- **Form/multipart/raw bodies** — file uploads, urlencoded, binary.
 - **Injectable matcher hook** — for runner-native diffs.
 - **Named variable store** / declarative format.
 - **Native per-language SDKs** (Java/Go/etc.) — only if an org forces it.
