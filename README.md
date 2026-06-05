@@ -1,4 +1,4 @@
-# @your-org/apitest
+# @mikkeljuhl/vouch
 
 A reusable TypeScript framework for **code-authored, E2E-style API tests** against
 an **already-deployed** server. You create a **client** with a base URL and
@@ -41,9 +41,9 @@ bun test                                   # discover + run *.test.ts
 bun test tests/users.test.ts               # a single file
 
 # Or via the bundled CLI (a thin wrapper over `bun test`):
-apitest                                     # = bun test
-apitest tests/users.test.ts
-apitest --junit reports/junit.xml          # expands to Bun's JUnit reporter flags
+vouch                                       # = bun test
+vouch tests/users.test.ts
+vouch --junit reports/junit.xml            # expands to Bun's JUnit reporter flags
 ```
 
 Set the base URL with an env var your suite reads (see [Quickstart](#quickstart)):
@@ -56,24 +56,24 @@ API_BASE_URL=https://your.api bun test
 
 A runner image (`oven/bun` base) with the framework preinstalled, so teams
 without a JavaScript toolchain run tests with one command. Your test files import
-the framework by its package name `@your-org/apitest` (resolved through a
+the framework by its package name `@mikkeljuhl/vouch` (resolved through a
 `node_modules` symlink baked into the image, which points at the shipped TS
 source).
 
 ```sh
-docker build -t apitest .
+docker build -t vouch .
 
 # Self-test: run the baked dogfood suite.
-docker run --rm apitest
+docker run --rm vouch
 
 # Run YOUR tests by mounting them over /app/tests:
-docker run --rm -v "$PWD/tests:/app/tests" apitest
+docker run --rm -v "$PWD/tests:/app/tests" vouch
 
 # Emit JUnit to the host:
 docker run --rm \
   -v "$PWD/tests:/app/tests" \
   -v "$PWD/reports:/app/reports" \
-  apitest --reporter=junit --reporter-outfile=/app/reports/junit.xml
+  vouch --reporter=junit --reporter-outfile=/app/reports/junit.xml
 ```
 
 ### 3. CI (GitHub Actions)
@@ -89,7 +89,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v5
-      - uses: your-org/apitest@v1        # this repo provides action.yml at its root
+      - uses: mikkeljuhl/vouch@v1        # this repo provides action.yml at its root
         with:
           typecheck: 'true'              # optional; runs tsc --noEmit first
           # paths: tests                 # optional; default = all discovered tests
@@ -119,10 +119,10 @@ jobs:
         # tee Bun's console to a log so its full assertion messages can be
         # merged into the JUnit (Bun's JUnit omits them). `shell: bash` runs
         # with `set -o pipefail`, so a failed `bun test` still fails the step.
-        run: bun test --reporter=junit --reporter-outfile=reports/junit.xml 2>&1 | tee apitest-console.log
+        run: bun test --reporter=junit --reporter-outfile=reports/junit.xml 2>&1 | tee vouch-console.log
       - name: Job summary + annotations
         if: always()
-        run: bun scripts/ci-summary.mjs reports/junit.xml apitest-console.log
+        run: bun scripts/ci-summary.mjs reports/junit.xml vouch-console.log
 ```
 
 No third-party reporting action is needed — `scripts/ci-summary.mjs` parses the
@@ -138,7 +138,7 @@ file-scoped variable, and the base URL is read from an env var by the consumer.
 
 ```ts
 import { test, beforeAll } from 'bun:test'
-import { createClient, type Client } from '@your-org/apitest'
+import { createClient, type Client } from '@mikkeljuhl/vouch'
 
 let client: Client
 
@@ -150,7 +150,7 @@ beforeAll(() => {
     headers: {
       // Auth is just a header callable, resolved per request (see API reference).
       Authorization: () => `Bearer ${process.env.API_TOKEN ?? 'demo-token'}`,
-      'X-Test-Run': 'apitest-quickstart',
+      'X-Test-Run': 'vouch-quickstart',
     },
     timeoutMs: 10_000,
   })
@@ -439,7 +439,7 @@ reads a file **relative to the test module** (via `import.meta.url`, so it works
 regardless of cwd) and returns a `Blob`:
 
 ```ts
-import { createClient, fixture } from '@your-org/apitest'
+import { createClient, fixture } from '@mikkeljuhl/vouch'
 
 // multipart/form-data: string fields + one or more files share one FormData.
 const zip = fixture(import.meta.url, './fixtures/sample.zip', 'application/zip')
@@ -509,15 +509,15 @@ const client = createClient({ baseUrl, debug: 'onFailure' }) // or 'always' / tr
 Or enable it from the environment without touching code:
 
 ```bash
-APITEST_DEBUG=1 bun test          # 'onFailure' (dump only on a failed assertion)
-APITEST_DEBUG=always bun test     # dump every request
+VOUCH_DEBUG=1 bun test          # 'onFailure' (dump only on a failed assertion)
+VOUCH_DEBUG=always bun test     # dump every request
 ```
 
 A dump reflects the **actual request sent** (final headers incl. the cookie jar
 and any `beforeRequest` mutations). Sensitive headers are masked automatically:
 
 ```
-── apitest ─────────────────────────────
+── vouch ─────────────────────────────
 → GET https://api.example.com/users/1
   headers: { authorization: "***", accept: "application/json" }
   body: {"name":"Ada"}
@@ -611,8 +611,8 @@ built-in `junit` reporter, with the console teed to a log so the full assertion
 messages can be recovered (Bun's JUnit omits them):
 
 ```sh
-bun test --reporter=junit --reporter-outfile=reports/junit.xml 2>&1 | tee apitest-console.log
-bun scripts/ci-summary.mjs reports/junit.xml apitest-console.log
+bun test --reporter=junit --reporter-outfile=reports/junit.xml 2>&1 | tee vouch-console.log
+bun scripts/ci-summary.mjs reports/junit.xml vouch-console.log
 ```
 
 The emitted XML (and the optional console log) are consumed by the repo-local,

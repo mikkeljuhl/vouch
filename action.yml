@@ -1,5 +1,5 @@
-name: 'apitest — run API tests'
-description: 'Run apitest API tests with Bun, emit JUnit, and post inline annotations + a job summary.'
+name: 'vouch — run API tests'
+description: 'Run vouch API tests with Bun, emit JUnit, and post inline annotations + a job summary.'
 branding:
   icon: 'check-circle'
   color: 'green'
@@ -53,7 +53,7 @@ runs:
       # it into the JUnit. `shell: bash` runs with `set -o pipefail` by default,
       # so a failing `bun test` still fails this step through the pipe (tee's
       # success doesn't mask the test failure).
-      run: bun test ${{ inputs.paths }} --reporter=junit --reporter-outfile=${{ inputs.junit-file }} 2>&1 | tee apitest-console.log
+      run: bun test ${{ inputs.paths }} --reporter=junit --reporter-outfile=${{ inputs.junit-file }} 2>&1 | tee vouch-console.log
 
     # Parse the JUnit XML into inline annotations + a Markdown job summary, and
     # merge the captured console messages into the JUnit <failure> elements (so
@@ -64,4 +64,4 @@ runs:
       if: always()
       shell: bash
       working-directory: ${{ inputs.working-directory }}
-      run: bun "${{ github.action_path }}/scripts/ci-summary.mjs" "${{ inputs.junit-file }}" apitest-console.log
+      run: bun "${{ github.action_path }}/scripts/ci-summary.mjs" "${{ inputs.junit-file }}" vouch-console.log

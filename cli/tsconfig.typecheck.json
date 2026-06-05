@@ -1,5 +1,5 @@
 {
-  // Baseline tsconfig shipped for consumers: `apitest --typecheck` writes a temp
+  // Baseline tsconfig shipped for consumers: `vouch --typecheck` writes a temp
   // config that EXTENDS this and adds the consumer's test globs as `include`.
   // The goal is a sane default that needs zero tsconfig authoring by the user:
   //   - resolves our package types via its `exports` -> dist/index.d.ts

@@ -4,15 +4,15 @@
 // conveniences: `--junit <file>` expands to Bun's JUnit reporter flags, and
 // `--typecheck` runs an opt-in `tsc --noEmit` pass over the consumer's tests.
 //
-//   apitest                          → bun test
-//   apitest tests/users.test.ts      → bun test tests/users.test.ts
-//   apitest --junit reports/j.xml    → bun test --reporter=junit --reporter-outfile=reports/j.xml
-//   apitest --typecheck              → tsc --noEmit (then, if clean) bun test
-//   apitest --typecheck-only         → tsc --noEmit only; exit with its code
-//   apitest -- <any bun test flags>  → forwarded verbatim
+//   vouch                          → bun test
+//   vouch tests/users.test.ts      → bun test tests/users.test.ts
+//   vouch --junit reports/j.xml    → bun test --reporter=junit --reporter-outfile=reports/j.xml
+//   vouch --typecheck              → tsc --noEmit (then, if clean) bun test
+//   vouch --typecheck-only         → tsc --noEmit only; exit with its code
+//   vouch -- <any bun test flags>  → forwarded verbatim
 //
 // Bun (and `bun test`) transpile + type-strip but NEVER type-check, so typecheck
-// is its own tsc pass. It is OPT-IN: a plain `apitest <file>` still runs a test
+// is its own tsc pass. It is OPT-IN: a plain `vouch <file>` still runs a test
 // with type errors (type-stripped) — `--typecheck` is the only thing that gates.
 //
 // A standalone, install-nothing binary (`bun build --compile`) is deferred — see
@@ -23,9 +23,9 @@ const argv = process.argv.slice(2)
 if (argv[0] === '--help' || argv[0] === '-h') {
   console.log(
     [
-      'apitest — run API tests with Bun',
+      'vouch — run API tests with Bun',
       '',
-      'Usage: apitest [paths...] [--typecheck | --typecheck-only] [--junit <file>] [-- <bun test flags>]',
+      'Usage: vouch [paths...] [--typecheck | --typecheck-only] [--junit <file>] [-- <bun test flags>]',
       '',
       '  --typecheck       type-check the test files (tsc --noEmit), then run them',
       '                    (skips the run and exits non-zero if type-checking fails)',
@@ -33,7 +33,7 @@ if (argv[0] === '--help' || argv[0] === '-h') {
       '  --junit <file>    write a JUnit XML report to <file>',
       '  -h, --help        show this help',
       '',
-      'Type-checking uses a baseline tsconfig shipped with apitest, so no tsconfig',
+      'Type-checking uses a baseline tsconfig shipped with vouch, so no tsconfig',
       'authoring is needed. Paths default to **/*.test.ts and **/*.spec.ts',
       '(node_modules excluded). Any other arguments are passed through to `bun test`.',
     ].join('\n'),
@@ -41,7 +41,7 @@ if (argv[0] === '--help' || argv[0] === '-h') {
   process.exit(0)
 }
 
-// Parse out apitest-owned flags; everything else passes through to `bun test`.
+// Parse out vouch-owned flags; everything else passes through to `bun test`.
 // Path-like args (non-flags) double as typecheck target globs.
 let typecheck = false
 let typecheckOnly = false
@@ -57,7 +57,7 @@ for (let i = 0; i < argv.length; i++) {
   } else if (arg === '--junit') {
     const file = argv[++i]
     if (!file) {
-      console.error('apitest: --junit requires a file path')
+      console.error('vouch: --junit requires a file path')
       process.exit(2)
     }
     passthrough.push('--reporter=junit', `--reporter-outfile=${file}`)
@@ -96,7 +96,7 @@ async function runTypecheck(targetArgs: string[]): Promise<number> {
         )
       : ['**/*.test.ts', '**/*.spec.ts']
 
-  const tmpConfig = `tsconfig.apitest-typecheck.${process.pid}.json`
+  const tmpConfig = `tsconfig.vouch-typecheck.${process.pid}.json`
   const tmpPath = `${process.cwd()}/${tmpConfig}`
 
   await Bun.write(

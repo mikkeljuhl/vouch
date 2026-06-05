@@ -179,8 +179,8 @@ correlation IDs, etc. Running per attempt means retries **re-sign** correctly.
   `AssertionError` is rethrown unchanged).
 - `'always'` — dump every request after it completes.
 
-The env var **`APITEST_DEBUG`** (truthy) also enables it
-(`APITEST_DEBUG=always` ⇒ `'always'`, otherwise `'onFailure'`); a per-request
+The env var **`VOUCH_DEBUG`** (truthy) also enables it
+(`VOUCH_DEBUG=always` ⇒ `'always'`, otherwise `'onFailure'`); a per-request
 **`.debug()`** forces `'always'` for that one request regardless of the client
 setting. The dump reflects the **actual request sent** — final headers including
 the cookie jar and `beforeRequest` mutations — captured via an internal
@@ -188,7 +188,7 @@ the cookie jar and `beforeRequest` mutations — captured via an internal
 `fetch`. Bodies are truncated to ~2KB.
 
 ```
-── apitest ─────────────────────────────
+── vouch ─────────────────────────────
 → GET https://api.example.com/users/1
   headers: { authorization: "***", accept: "application/json" }
   body: {"name":"Ada"}
@@ -221,7 +221,7 @@ them). Pure, exported helpers `redactHeaders(headers, names)` and
 
 ```ts
 import { describe, test, beforeAll } from 'bun:test'   // or 'vitest'
-import { createClient, type Client } from '@your-org/apitest'
+import { createClient, type Client } from '@mikkeljuhl/vouch'
 
 describe('users', () => {
   let client: Client
@@ -419,7 +419,7 @@ src/
   assert.ts        # engine-agnostic AssertionError + matchers (status/header/json)
   index.ts         # public exports (createClient, types)
 cli/
-  apitest.ts       # CLI entry: discover + run *.test.ts (Bun)
+  vouch.ts         # CLI entry: discover + run *.test.ts (Bun)
 tests/             # dogfood suite vs public sample API (uses bun:test)
 Dockerfile         # oven/bun base + framework; `docker run -v ./tests ...`
 scripts/
@@ -449,7 +449,7 @@ we ever publish for non-TS-aware consumers (deferred, §10).
   exposes no flag/JSON reporter to include it (only `junit` + `dots`). The full
   assertion message — our rich structured path-level diff (§5) — appears only in
   Bun's **console** output. So the Test step tees Bun's console to a log
-  (`… --reporter-outfile=… 2>&1 | tee apitest-console.log`) and `ci-summary.mjs`
+  (`… --reporter-outfile=… 2>&1 | tee vouch-console.log`) and `ci-summary.mjs`
   takes that log as an optional 2nd arg. It parses each failure's message from
   the console (the block from the `AssertionError:`/`TypeError:`/`error:` line
   down to the first stack frame, keyed by the `(fail) <name> [<time>]` trailer)
@@ -519,7 +519,7 @@ assertion impl, distribution, and CI** — **not** the public API.
 
 **Status: M0–M6 complete.** The framework now runs Bun-first with an
 engine-agnostic core, ships TS source (no build), distributes via a Docker runner
-image + `apitest` CLI, and reports JUnit + a repo-local job summary. The public
+image + `vouch` CLI, and reports JUnit + a repo-local job summary. The public
 API and runtime semantics are unchanged from the Node+Vitest implementation.
 
 **M0 — Bun toolchain.** ✅ Done. Added Bun; `bun test` discovers the suite (no
@@ -539,9 +539,9 @@ green, annotations + summary render.
 **M4 — Docker image.** ✅ Done. `Dockerfile` on `oven/bun`; `docker run -v ./tests …`
 runs the suite and emits JUnit. *Exit:* image runs the dogfood suite.
 
-**M5 — CLI / standalone binary.** ✅ Done. `cli/apitest.ts` is a thin wrapper over
-`bun test` (registered as the `apitest` bin); a standalone compiled binary is
-deferred (§10) — Bun's test runner isn't an embeddable API. *Exit:* `apitest`
+**M5 — CLI / standalone binary.** ✅ Done. `cli/vouch.ts` is a thin wrapper over
+`bun test` (registered as the `vouch` bin); a standalone compiled binary is
+deferred (§10) — Bun's test runner isn't an embeddable API. *Exit:* `vouch`
 runs a tests dir; binary path decision recorded.
 
 **M6 — Cleanup & docs.** ✅ Done. Removed Vitest/tsup/Node-matrix leftovers

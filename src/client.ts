@@ -14,7 +14,7 @@ import type { RedactOptions } from './redact'
  * Failure-diagnostics mode (DESIGN.md §4). `true` is an alias for `'onFailure'`.
  * - `'onFailure'` — dump the request/response only when an assertion throws.
  * - `'always'`    — dump every request after it completes.
- * Default is off (no dump). May also be enabled via the `APITEST_DEBUG` env var.
+ * Default is off (no dump). May also be enabled via the `VOUCH_DEBUG` env var.
  */
 export type DebugMode = boolean | 'onFailure' | 'always'
 
@@ -112,8 +112,8 @@ export interface ClientOptions {
   /**
    * Failure diagnostics (DESIGN.md §4). When enabled, a compact request +
    * response block is written to **stderr**. `true` ⇒ `'onFailure'`. Off by
-   * default. The `APITEST_DEBUG` env var (truthy) also enables it
-   * (`APITEST_DEBUG=always` ⇒ `'always'`, otherwise `'onFailure'`); a per-request
+   * default. The `VOUCH_DEBUG` env var (truthy) also enables it
+   * (`VOUCH_DEBUG=always` ⇒ `'always'`, otherwise `'onFailure'`); a per-request
    * `.debug()` forces `'always'` for that one request.
    */
   debug?: DebugMode
@@ -308,14 +308,14 @@ function serializeCookieHeader(jar: Map<string, string>): string | undefined {
 
 /**
  * Resolve the effective debug mode from the factory option and the
- * `APITEST_DEBUG` env var. The factory option (when set) wins; `true` aliases to
- * `'onFailure'`. With no factory option a truthy `APITEST_DEBUG` enables it
+ * `VOUCH_DEBUG` env var. The factory option (when set) wins; `true` aliases to
+ * `'onFailure'`. With no factory option a truthy `VOUCH_DEBUG` enables it
  * (`'always'` when the env value is exactly `always`, else `'onFailure'`).
  * Returns `undefined` when diagnostics are off.
  */
 export function resolveDebugMode(
   option: DebugMode | undefined,
-  env: string | undefined = process.env.APITEST_DEBUG,
+  env: string | undefined = process.env.VOUCH_DEBUG,
 ): 'onFailure' | 'always' | undefined {
   if (option !== undefined) {
     if (option === false) return undefined
