@@ -24,7 +24,15 @@ import {
   type AssertContext,
   type SchemaInput,
 } from './assert'
-import type { Client, HeaderValue, HttpMethod, RetryOptions, RequestOptions } from './client'
+import type {
+  Client,
+  HeaderValue,
+  HttpMethod,
+  RetryOptions,
+  RequestOptions,
+  OutgoingRequest,
+} from './client'
+import { redactHeaders, redactBodyText } from './redact'
 
 /** The typed response object an awaited builder resolves to (DESIGN.md §3). */
 export interface ApiResponse<T> {
@@ -99,6 +107,12 @@ export interface RequestBuilder<T = unknown> extends PromiseLike<ApiResponse<T>>
   timeout(ms: number): this
   /** Store a retry policy for this request (execution wired in Phase 3). */
   retry(options: RetryOptions): this
+  /**
+   * Force a failure-diagnostics dump (`'always'`) for THIS request only,
+   * regardless of the client's `debug` setting. The dump (request + response,
+   * with secrets redacted) is written to stderr after the request completes.
+   */
+  debug(): this
   /** Assert the response status equals `code`. */
   expectStatus(code: number): this
   /** Assert a response header matches `value` (exact string) or `RegExp`. */
@@ -233,6 +247,92 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+/** Max bytes of a body shown in a debug dump before truncation (~2KB). */
+const DEBUG_BODY_MAX = 2048
+
+/** Render a body for a debug dump: strings shown as-is, others stringified. */
+function debugBody(body: unknown): string | undefined {
+  if (body === null || body === undefined) return undefined
+  if (typeof body === 'string') return body
+  // Non-string bodies (URLSearchParams/FormData/Blob/stream) aren't readably
+  // serializable here; show a placeholder rather than risk leaking/garbling.
+  if (body instanceof URLSearchParams) return body.toString()
+  return `<${(body as object).constructor?.name ?? typeof body} body>`
+}
+
+/** Truncate a dump body to ~2KB, appending a marker when cut. */
+function truncateBody(text: string): string {
+  if (text.length <= DEBUG_BODY_MAX) return text
+  return `${text.slice(0, DEBUG_BODY_MAX)}… (truncated)`
+}
+
+/** Pretty-print a header record on one line: `{ a: '1', b: '2' }`. */
+function formatHeaders(headers: Record<string, string>): string {
+  const inner = Object.entries(headers)
+    .map(([k, v]) => `${k}: ${JSON.stringify(v)}`)
+    .join(', ')
+  return inner ? `{ ${inner} }` : '{}'
+}
+
+/** What a debug dump needs about the response side. */
+interface DebugResponseInfo {
+  status: number
+  durationMs: number
+  headers: Record<string, string>
+  text: string
+}
+
+/**
+ * Build the readable request + response diagnostics block (DESIGN.md §4).
+ * Sensitive header values are masked and `bodyKeys` are masked in JSON bodies.
+ * Returns the full string (caller writes it to stderr).
+ */
+export function formatDebugDump(
+  req: OutgoingRequest,
+  res: DebugResponseInfo | undefined,
+  redact: { headers?: string[]; bodyKeys?: string[] } | undefined,
+): string {
+  const headerNames = redact?.headers
+  const bodyKeys = redact?.bodyKeys ?? []
+  const lines: string[] = []
+  lines.push('── apitest ─────────────────────────────')
+
+  // Request side.
+  lines.push(`→ ${req.method} ${req.url}`)
+  lines.push(`  headers: ${formatHeaders(redactHeaders(req.headers, headerNames))}`)
+  const reqBody = debugBody(req.body)
+  if (reqBody !== undefined) {
+    lines.push(`  body: ${truncateBody(redactBodyText(reqBody, bodyKeys))}`)
+  }
+
+  // Response side.
+  if (res) {
+    lines.push(`← ${res.status}  (${Math.round(res.durationMs)}ms)`)
+    lines.push(`  headers: ${formatHeaders(redactHeaders(res.headers, headerNames))}`)
+    lines.push(`  body: ${truncateBody(redactBodyText(res.text, bodyKeys))}`)
+  } else {
+    lines.push('← <no response (request threw)>')
+  }
+
+  lines.push('─────────────────────────────────────────')
+  return lines.join('\n')
+}
+
+/** Snapshot a `Headers` instance into a plain record (for dump redaction). */
+function headersToRecord(headers: Headers): Record<string, string> {
+  const out: Record<string, string> = {}
+  headers.forEach((value, key) => {
+    out[key] = value
+  })
+  // Surface Set-Cookie distinctly when present (forEach folds duplicates).
+  const getSetCookie = (headers as Headers & { getSetCookie?: () => string[] }).getSetCookie
+  if (typeof getSetCookie === 'function') {
+    const cookies = getSetCookie.call(headers)
+    if (cookies.length) out['set-cookie'] = cookies.join(', ')
+  }
+  return out
+}
+
 /**
  * Construct a fluent builder bound to `client`. Configuration accumulates in
  * closure state; `send()` (also reachable via `then`) performs the request and
@@ -257,6 +357,11 @@ export function createRequestBuilder<T>(
   let timeoutMs: number | undefined
   // Stored for Phase 3; intentionally unused in execution for now.
   let retryOptions: RetryOptions | undefined
+  // Per-request `.debug()` forces an 'always' dump regardless of client.debug.
+  let forceDebug = false
+  // The actual request sent on the last attempt (captured via `onSend`), used
+  // to render the debug dump. Only populated when debug is enabled.
+  let lastSent: OutgoingRequest | undefined
   const assertions: Assertion<T>[] = []
 
   let pending: Promise<ApiResponse<T>> | undefined
@@ -330,6 +435,11 @@ export function createRequestBuilder<T>(
       // policy overrides the factory default (see effective-retry resolution in
       // `run()`).
       retryOptions = options
+      return this
+    },
+
+    debug() {
+      forceDebug = true
       return this
     },
 
@@ -429,11 +539,18 @@ export function createRequestBuilder<T>(
    * `Retry-After` header when present (capped). Default `delayMs: 0` keeps the
    * original immediate-retry behavior.
    */
-  async function execute(): Promise<Response> {
+  async function execute(debugEnabled: boolean): Promise<Response> {
     const effective = retryOptions ?? client.retry
     const times = effective?.times ?? 0
     const when = effective?.when
     const delayOpts = { delayMs: effective?.delayMs, backoff: effective?.backoff }
+    // When debug is on, capture each attempt's final request; the last one
+    // captured is what we dump (reflects cookies + beforeRequest mutations).
+    const onSend = debugEnabled
+      ? (meta: OutgoingRequest) => {
+          lastSent = { ...meta, headers: { ...meta.headers } }
+        }
+      : undefined
 
     // A ReadableStream body is consumed by the first fetch and cannot be replayed
     // on a subsequent attempt. Blob/FormData/URLSearchParams/string are
@@ -462,6 +579,7 @@ export function createRequestBuilder<T>(
           headers: mergedHeaders,
           body,
           timeoutMs,
+          onSend,
         })
         lastResponse = res
         // No more attempts left, or this response doesn't warrant a retry.
@@ -487,11 +605,30 @@ export function createRequestBuilder<T>(
   }
 
   async function run(): Promise<ApiResponse<T>> {
+    // Resolve the effective debug mode: a per-request `.debug()` forces 'always',
+    // otherwise fall back to the client's resolved mode (factory option / env).
+    const mode: 'onFailure' | 'always' | undefined = forceDebug ? 'always' : client.debug
+    const debugEnabled = mode !== undefined
+
+    // Write a diagnostics block to stderr from the captured request + a response.
+    const dump = (res: DebugResponseInfo | undefined): void => {
+      if (!lastSent) return
+      const block = formatDebugDump(lastSent, res, client.redact)
+      process.stderr.write(`${block}\n`)
+    }
+
     // Measure the wall-clock time of the request. With retry enabled this spans
     // ALL attempts (the whole `execute()` loop); since retry is opt-in and off by
     // default, in the common single-attempt case this is the one request's time.
     const start = performance.now()
-    const raw = await execute()
+    let raw: Response
+    try {
+      raw = await execute(debugEnabled)
+    } catch (error) {
+      // Transport failure: dump the request (no response) when debug is on.
+      if (debugEnabled) dump(undefined)
+      throw error
+    }
     const durationMs = performance.now() - start
     const { body, text } = await parseBody<T>(raw)
     const response: ApiResponse<T> = {
@@ -502,13 +639,38 @@ export function createRequestBuilder<T>(
       raw,
       durationMs,
     }
-    // Context for assertion messages: the same URL fetch was sent to.
-    const ctx: AssertContext = { method, url: client.resolveUrl(path, query) }
+
+    const resInfo: DebugResponseInfo = {
+      status: raw.status,
+      durationMs,
+      headers: headersToRecord(raw.headers),
+      text,
+    }
+
+    // Context for assertion messages: the same URL fetch was sent to. Thread the
+    // client's redact.bodyKeys so the structured diff masks those field values.
+    const ctx: AssertContext = {
+      method,
+      url: client.resolveUrl(path, query),
+      redactKeys: client.redact?.bodyKeys,
+    }
+
+    if (mode === 'always') {
+      // Dump every request once it completes, regardless of assertion outcome.
+      dump(resInfo)
+    }
+
     // Fail-fast: await in declared order so an async assertion (e.g. a Standard
     // Schema with an async `validate`) is fully settled before the next runs; the
-    // first rejection/throw stops the rest.
-    for (const assertion of assertions) {
-      await assertion(response, ctx)
+    // first rejection/throw stops the rest. For 'onFailure', dump on a throw then
+    // rethrow the ORIGINAL error.
+    try {
+      for (const assertion of assertions) {
+        await assertion(response, ctx)
+      }
+    } catch (error) {
+      if (mode === 'onFailure') dump(resInfo)
+      throw error
     }
     return response
   }
