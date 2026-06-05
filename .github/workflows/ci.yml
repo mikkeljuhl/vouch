@@ -1,0 +1,45 @@
+name: CI
+
+# Repo-local CI for the framework's own dogfood suite (DESIGN.md §7/§9: a
+# packaged reusable workflow/action is deferred — this runs OUR tests only).
+on:
+  pull_request:
+
+# Annotations and the job summary need no extra scopes (they're log commands and
+# a file write). Keep the token least-privileged.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test (Node 20)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      # GITHUB_ACTIONS=true is set automatically, so vitest.config.ts enables the
+      # github-actions (inline annotations) + json reporters here. The suite hits
+      # a live public API (jsonplaceholder); test-level retry:1 absorbs transient
+      # flake.
+      - name: Test
+        run: npm test
+
+      # Render the job-summary table even when tests fail (the json report is
+      # written regardless). The job still fails because the Test step failed.
+      - name: Job summary
+        if: always()
+        run: node scripts/ci-summary.mjs
