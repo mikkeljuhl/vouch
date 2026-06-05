@@ -12,14 +12,14 @@ permissions:
 
 jobs:
   test:
-    name: Test (Node 20)
+    name: Test (Node 24)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
 
       - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
 
       - name: Install

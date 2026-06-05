@@ -15,7 +15,7 @@ See [`DESIGN.md`](./DESIGN.md) for the full design and rationale.
 
 ## Requirements
 
-- **Node 20+** (uses native `fetch`, `AbortSignal.timeout`, `crypto.randomUUID`).
+- **Node 24+** (uses native `fetch`, `AbortSignal.timeout`, `crypto.randomUUID`).
 - **Vitest** as a **peer dependency** — the consumer must have `vitest` installed.
   The framework imports `expect` from `vitest` and runs inside your Vitest test
   process, so Vitest is always present at runtime; it is intentionally *not*
