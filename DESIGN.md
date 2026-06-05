@@ -245,7 +245,9 @@ RequestBuilder ──builds──▶ fetch ──response──▶ built-in asse
       │ created by user in beforeAll
    createClient(opts)
 
-host runner (bun test | vitest) ──▶ JUnit reporter ──▶ job-summary script ──▶ CI
+host runner (bun test | vitest) ──▶ JUnit reporter ─┐
+                                  └▶ console log ────┴▶ job-summary script ──▶ CI
+                                     (messages merged into JUnit; see §8)
 ```
 
 ---
@@ -263,7 +265,7 @@ cli/
 tests/             # dogfood suite vs public sample API (uses bun:test)
 Dockerfile         # oven/bun base + framework; `docker run -v ./tests ...`
 scripts/
-  ci-summary.mjs   # parse JUnit XML → $GITHUB_STEP_SUMMARY table
+  ci-summary.mjs   # parse JUnit XML (+ console log) → annotations, summary, enriched JUnit
 tsconfig.json      # typecheck only (`tsc --noEmit`); no emit/build
 ```
 
@@ -282,7 +284,28 @@ we ever publish for non-TS-aware consumers (deferred, §10).
   any CI can parse it).
 - **Job summary** via `scripts/ci-summary.mjs`, a dependency-free script that
   parses the JUnit XML into a `$GITHUB_STEP_SUMMARY` Markdown table (totals,
-  per-file breakdown, collapsed failure details). Repo-local, not shipped.
+  per-file breakdown, collapsed failure details) and prints inline `::error`
+  annotations. Repo-local, not shipped.
+- **Console-message merge (the Bun JUnit gap).** Bun's `--reporter=junit`
+  writes `<failure type="AssertionError" />` with **no message/body**, and Bun
+  exposes no flag/JSON reporter to include it (only `junit` + `dots`). The full
+  assertion message — our rich structured path-level diff (§5) — appears only in
+  Bun's **console** output. So the Test step tees Bun's console to a log
+  (`… --reporter-outfile=… 2>&1 | tee apitest-console.log`) and `ci-summary.mjs`
+  takes that log as an optional 2nd arg. It parses each failure's message from
+  the console (the block from the `AssertionError:`/`TypeError:`/`error:` line
+  down to the first stack frame, keyed by the `(fail) <name> [<time>]` trailer)
+  and **merges it back into the JUnit `<failure>` elements** as a `message`
+  attribute + `<![CDATA[…]]>` body. This makes the JUnit artifact itself carry
+  the message (downstream-consumable) and gives the annotations/summary the real
+  diff instead of just the bare type. With no console arg the script is
+  unchanged (type-only) — backward-compatible.
+  - *Name matching.* Bun's console `(fail)` line uses the describe ancestry
+    outermost-first (`outer > inner nested > test`); the JUnit `classname` holds
+    the same ancestry **reversed** (innermost-first, double-escaped). The script
+    reconstructs the console fullName from `classname` + `name` to match, with
+    fallbacks (unique title-suffix match; single-failure/single-message), and
+    leaves a testcase type-only if it can't match confidently (never crashes).
 - A packaged reusable action stays deferred (§9); CI wires the steps directly.
 
 ---
