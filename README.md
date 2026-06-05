@@ -190,6 +190,8 @@ type HeaderValue = string | (() => string | Promise<string>)
 interface RetryOptions {
   times: number                          // additional attempts after the first
   when?: (res: Response) => boolean      // caller-authoritative retry predicate
+  delayMs?: number                       // base delay BETWEEN attempts; default 0
+  backoff?: 'fixed' | 'exponential'      // default 'fixed'; exp = delayMs * 2^attemptIndex
 }
 
 interface OutgoingRequest {
@@ -228,7 +230,9 @@ interface ClientOptions {
   Per-request `.headers()` override factory headers; names are matched
   case-insensitively and the override wins on collision.
 - **`timeoutMs`** — default per-request timeout via `AbortSignal.timeout`,
-  overridable per call with `.timeout(ms)`. No default if omitted.
+  overridable per call with `.timeout(ms)`. **When omitted, a default of 30s
+  (`DEFAULT_TIMEOUT_MS`) applies** so requests don't hang forever. Set
+  `timeoutMs: 0` (factory or per-request) to **disable** the timeout entirely.
 - **`retry`** — default retry policy, overridable per call with `.retry(...)`.
   Omit it (or use `{ times: 0 }`) for no retries. See [Retry semantics](#retry-semantics).
 - **`cookies`** — opt-in in-memory session jar (default `false`). See
@@ -315,6 +319,8 @@ until you `await` the builder (or call `.send()`).
 | `.expectHeader(name, value)` | Assert a response header equals a string or matches a `RegExp`. |
 | `.expectJson(partial)` | **Partial** match — body contains `partial` (deep subset). |
 | `.expectJsonStrict(value)` | **Strict** match — body deep-equals `value`. |
+| `.expectText(string \| RegExp)` | Raw response text **contains** the substring or **matches** the `RegExp`. |
+| `.expectBody(string)` | Raw response text **exactly equals** the string (use `''` for an empty body). |
 | `.expectSchema(schema)` | Validate the body against a **Standard Schema** (zod/valibot/arktype/…) or a predicate `(body) => boolean`. |
 | `.expectUnder(ms)` | Assert the request completed within `ms` (checks `response.durationMs`). |
 | `.send()` | Perform the request and resolve to the response (same as `await`). |
@@ -353,6 +359,27 @@ GET https://api/users/1 — JSON body did not match (subset) (4 differences):
 > annotations and job summary. The enriched JUnit therefore carries the full
 > diff for downstream consumers.
 
+**Non-JSON body assertions.** The body is read **once as text** and exposed as
+`response.text` (always available, even for JSON). `.expectText` / `.expectBody`
+assert against that text — handy for plain text, HTML, or empty bodies:
+
+```ts
+// substring contains (text)
+await client.get('/health').expectStatus(200).expectText('OK')
+
+// RegExp match (HTML)
+await client.get('/page').expectStatus(200).expectText(/<title>.*<\/title>/)
+
+// exact body
+await client.get('/version').expectStatus(200).expectBody('1.2.3')
+
+// empty body (e.g. a 204)
+await client.delete('/users/1').expectStatus(204).expectBody('')
+```
+
+A malformed JSON body served with a JSON content-type does **not** throw — `body`
+falls back to the raw text (and `text` always holds it).
+
 Awaiting a builder resolves to an `ApiResponse<T>`:
 
 ```ts
@@ -360,6 +387,7 @@ interface ApiResponse<T> {
   status: number
   headers: Headers   // native, case-insensitive
   body: T            // parsed JSON when the response is JSON, else raw text
+  text: string       // raw response body read once as text (always populated)
   raw: Response      // the underlying fetch Response (already consumed)
   durationMs: number // wall-clock time of the request (all attempts if retried)
 }
@@ -471,22 +499,39 @@ assertions evaluate, so a real `4xx` is never masked.
 
 - **`times`** is the number of *additional* attempts after the first; total
   attempts = `times + 1`. Each attempt is a fresh request with its own
-  timeout/abort signal (**timeout applies per attempt**). No backoff is applied.
+  timeout/abort signal (**timeout applies per attempt**).
 - **Transport/network errors** (thrown fetch failures, timeouts/aborts) are
   **always retried** until attempts are exhausted, regardless of any predicate.
 - **Response-based retry:**
-  - With no `when` predicate, the **default policy retries `5xx` only** — never
-    `2xx`/`3xx`/`4xx`.
+  - With no `when` predicate, the **default policy retries `5xx` and `429`**
+    (Too Many Requests) — never other `2xx`/`3xx`/`4xx`. An exhausted `429`
+    still surfaces to your assertions.
   - With a `when` predicate, **the predicate is authoritative**: a response is
-    retried iff `when(res)` returns true (no hardcoded `5xx`).
+    retried iff `when(res)` returns true (no hardcoded `5xx`/`429`).
+- **Delay & backoff** (between attempts, never before the first):
+  - `delayMs` is the base delay; default `0` (immediate retries, original behavior).
+  - `backoff: 'fixed'` (default) waits `delayMs` each time; `'exponential'` waits
+    `delayMs * 2^attemptIndex`.
+  - **`Retry-After`** on a retried response (delta-seconds **or** HTTP-date)
+    overrides `delayMs`/`backoff` for that wait, capped at **30s**.
 - Resolution order: per-request `.retry(...)` ▸ factory `retry` ▸ none.
 
 ```ts
+// exponential backoff, retries 5xx + 429 by default
+await client
+  .get('/flaky')
+  .retry({ times: 3, delayMs: 200, backoff: 'exponential' })
+  .expectStatus(200)
+
+// custom predicate stays authoritative (retry only on 503)
 await client
   .get('/flaky')
   .retry({ times: 3, when: (r) => r.status === 503 })
   .expectStatus(200)
 ```
+
+The delay computation is exported as a pure `computeRetryDelay(attemptIndex,
+opts, response?)` for direct unit testing.
 
 ---
 

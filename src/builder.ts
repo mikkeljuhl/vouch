@@ -13,11 +13,13 @@
  */
 
 import {
+  assertBody,
   assertHeader,
   assertJson,
   assertJsonStrict,
   assertSchema,
   assertStatus,
+  assertText,
   assertUnder,
   type AssertContext,
   type SchemaInput,
@@ -32,6 +34,12 @@ export interface ApiResponse<T> {
   headers: Headers
   /** Parsed body — JSON when the response is JSON, else the raw text. */
   body: T
+  /**
+   * The raw response body read once as text. Always populated (even for JSON
+   * responses), so `.expectText()`/`.expectBody()` and ad-hoc assertions can read
+   * the unparsed payload.
+   */
+  text: string
   /** The underlying fetch `Response` (already consumed). */
   raw: Response
   /**
@@ -100,6 +108,17 @@ export interface RequestBuilder<T = unknown> extends PromiseLike<ApiResponse<T>>
   /** Assert the body deep-equals `value`. */
   expectJsonStrict(value: unknown): this
   /**
+   * Assert the raw response text **contains** `match` (when a string) or
+   * **matches** it (when a `RegExp`). Reads `response.text`, so it works on any
+   * content-type (plain text, HTML, etc.).
+   */
+  expectText(match: string | RegExp): this
+  /**
+   * Assert the raw response text **exactly equals** `expected`. Use
+   * `.expectBody('')` to assert an empty body.
+   */
+  expectBody(expected: string): this
+  /**
    * Assert the body validates against `schema`: either a Standard Schema
    * (zod/valibot/arktype/… — anything exposing `['~standard']`) or a plain
    * predicate `(body) => boolean`. Standard Schema `validate` may be async.
@@ -114,26 +133,104 @@ export interface RequestBuilder<T = unknown> extends PromiseLike<ApiResponse<T>>
   send(): Promise<ApiResponse<T>>
 }
 
-/** Parse a response body as JSON when it is JSON, otherwise as text. */
-async function parseBody<T>(res: Response): Promise<T> {
+/**
+ * Read a response body **once as text**, then derive the parsed `body`:
+ * - JSON content-type → `JSON.parse(text)`; on parse failure fall back to the
+ *   raw text (never throws — a malformed JSON body is surfaced, not crashed on).
+ * - otherwise → the raw text.
+ *
+ * `raw.text()`/`.json()` each consume the stream, so we read text once and parse
+ * from the string rather than touching the stream twice.
+ */
+async function parseBody<T>(res: Response): Promise<{ body: T; text: string }> {
+  const text = await res.text()
   const contentType = res.headers.get('content-type') ?? ''
   if (/\bjson\b/i.test(contentType)) {
-    return (await res.json()) as T
+    try {
+      return { body: JSON.parse(text) as T, text }
+    } catch {
+      // Malformed JSON despite a JSON content-type: fall back to text, don't throw.
+      return { body: text as unknown as T, text }
+    }
   }
-  return (await res.text()) as unknown as T
+  return { body: text as unknown as T, text }
 }
 
 /**
  * Decide whether a settled `Response` should be retried.
  *
  * - With a caller-provided `when` predicate, the predicate is authoritative: the
- *   response is retried iff `when(res)` returns true (no 5xx hardcoding).
- * - Without a predicate, the default policy retries 5xx responses only, never
- *   2xx/3xx/4xx — so a real 4xx is never masked (DESIGN.md §8).
+ *   response is retried iff `when(res)` returns true (no 5xx/429 hardcoding).
+ * - Without a predicate, the default policy retries **5xx and 429** (Too Many
+ *   Requests) responses only, never other 2xx/3xx/4xx — so a real 4xx is never
+ *   masked (DESIGN.md §8). Retry is opt-in (`times > 0`), and an exhausted 429
+ *   still surfaces to assertions.
  */
 function shouldRetryResponse(res: Response, when?: (res: Response) => boolean): boolean {
   if (when) return when(res)
-  return res.status >= 500
+  return res.status >= 500 || res.status === 429
+}
+
+/** Cap for a `Retry-After`-derived delay (ms) so a hostile/large value can't hang a test. */
+const RETRY_AFTER_MAX_MS = 30_000
+
+/**
+ * Parse a `Retry-After` header value into a delay in milliseconds, or `null` if
+ * absent/unparseable. Supports both forms (RFC 9110):
+ * - **delta-seconds** (e.g. `"2"`) → `2000` ms.
+ * - **HTTP-date** (e.g. `"Wed, 21 Oct 2026 07:28:00 GMT"`) → the difference from
+ *   `now` (clamped to ≥ 0), where `now` is injectable for testability.
+ */
+export function parseRetryAfter(value: string | null, now: number = Date.now()): number | null {
+  if (value === null) return null
+  const trimmed = value.trim()
+  if (trimmed === '') return null
+  // delta-seconds: a bare non-negative integer.
+  if (/^\d+$/.test(trimmed)) {
+    return Number(trimmed) * 1000
+  }
+  // HTTP-date.
+  const when = Date.parse(trimmed)
+  if (Number.isNaN(when)) return null
+  return Math.max(0, when - now)
+}
+
+/**
+ * Pure, unit-testable computation of the delay (ms) to wait **before** a retry.
+ *
+ * - `attemptIndex` is 0 for the wait before the 1st retry (i.e. after the 1st
+ *   failed attempt), 1 before the 2nd retry, etc.
+ * - When `response` carries a parseable `Retry-After` header, that value wins —
+ *   overriding `delayMs`/`backoff` — capped at {@link RETRY_AFTER_MAX_MS}.
+ * - Otherwise: `'fixed'` (default) returns `delayMs`; `'exponential'` returns
+ *   `delayMs * 2^attemptIndex`. `delayMs` defaults to `0` (immediate retry).
+ * - For a transport error (no `response`), only `delayMs`/`backoff` apply.
+ *
+ * `now` is injectable so HTTP-date `Retry-After` parsing is deterministic in tests.
+ */
+export function computeRetryDelay(
+  attemptIndex: number,
+  opts: Pick<RetryOptions, 'delayMs' | 'backoff'>,
+  response?: Response,
+  now: number = Date.now(),
+): number {
+  if (response) {
+    const retryAfter = parseRetryAfter(response.headers.get('retry-after'), now)
+    if (retryAfter !== null) {
+      return Math.min(retryAfter, RETRY_AFTER_MAX_MS)
+    }
+  }
+  const base = opts.delayMs ?? 0
+  if (opts.backoff === 'exponential') {
+    return base * 2 ** attemptIndex
+  }
+  return base
+}
+
+/** Resolve after `ms` milliseconds (no-op for `ms <= 0`). */
+function sleep(ms: number): Promise<void> {
+  if (ms <= 0) return Promise.resolve()
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 /**
@@ -265,6 +362,20 @@ export function createRequestBuilder<T>(
       return this
     },
 
+    expectText(match) {
+      assertions.push((res, ctx) => {
+        assertText(ctx, match, res.text)
+      })
+      return this
+    },
+
+    expectBody(expected) {
+      assertions.push((res, ctx) => {
+        assertBody(ctx, expected, res.text)
+      })
+      return this
+    },
+
     expectSchema(schema) {
       // assertSchema may return a Promise (async Standard Schema `validate`); the
       // run loop awaits it, so returning it here preserves fail-fast ordering.
@@ -311,12 +422,18 @@ export function createRequestBuilder<T>(
    * Each attempt is a fresh `_request` call and therefore gets its own
    * timeout/abort signal (timeout applies per attempt). The request body is a
    * pre-serialized string (set via `.json()`), so it is safely resent verbatim
-   * on every attempt. No backoff/delay is applied (immediate retries).
+   * on every attempt.
+   *
+   * Between attempts (never before the first) we sleep `computeRetryDelay(...)`
+   * ms — `delayMs`/`backoff` from the policy, overridden by a response's
+   * `Retry-After` header when present (capped). Default `delayMs: 0` keeps the
+   * original immediate-retry behavior.
    */
   async function execute(): Promise<Response> {
     const effective = retryOptions ?? client.retry
     const times = effective?.times ?? 0
     const when = effective?.when
+    const delayOpts = { delayMs: effective?.delayMs, backoff: effective?.backoff }
 
     // A ReadableStream body is consumed by the first fetch and cannot be replayed
     // on a subsequent attempt. Blob/FormData/URLSearchParams/string are
@@ -351,10 +468,14 @@ export function createRequestBuilder<T>(
         if (isLastAttempt || !shouldRetryResponse(res, when)) {
           return res
         }
+        // Wait before the next attempt; Retry-After (if any) wins over delay/backoff.
+        await sleep(computeRetryDelay(attempt, delayOpts, res))
       } catch (error) {
         // Transport/network errors are always retryable until exhausted.
         lastError = error
         if (isLastAttempt) throw error
+        // No response → delayMs/backoff only.
+        await sleep(computeRetryDelay(attempt, delayOpts))
       }
     }
 
@@ -372,11 +493,12 @@ export function createRequestBuilder<T>(
     const start = performance.now()
     const raw = await execute()
     const durationMs = performance.now() - start
-    const parsed = await parseBody<T>(raw)
+    const { body, text } = await parseBody<T>(raw)
     const response: ApiResponse<T> = {
       status: raw.status,
       headers: raw.headers,
-      body: parsed,
+      body,
+      text,
       raw,
       durationMs,
     }

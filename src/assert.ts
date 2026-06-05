@@ -412,6 +412,49 @@ export function assertJsonStrict(ctx: AssertContext, expected: unknown, body: un
   }
 }
 
+/** Truncate a string for an error message so a large body doesn't flood output. */
+function previewText(text: string, max = 200): string {
+  const json = JSON.stringify(text.length > max ? `${text.slice(0, max)}… (truncated)` : text)
+  return json
+}
+
+/**
+ * Assert the raw response text **contains** `match` (string substring) or
+ * **matches** it (`RegExp.test`). The message shows the match and a truncated
+ * preview of the actual text.
+ */
+export function assertText(
+  ctx: AssertContext,
+  match: string | RegExp,
+  actualText: string,
+): void {
+  if (match instanceof RegExp) {
+    if (!match.test(actualText)) {
+      throw new AssertionError(
+        `${prefix(ctx)}expected response text to match ${match} but got ${previewText(actualText)}`,
+      )
+    }
+    return
+  }
+  if (!actualText.includes(match)) {
+    throw new AssertionError(
+      `${prefix(ctx)}expected response text to contain ${JSON.stringify(match)} but got ${previewText(actualText)}`,
+    )
+  }
+}
+
+/**
+ * Assert the raw response text **exactly equals** `expected`. Covers exact-text
+ * and empty-body (`expected === ''`) checks.
+ */
+export function assertBody(ctx: AssertContext, expected: string, actualText: string): void {
+  if (actualText !== expected) {
+    throw new AssertionError(
+      `${prefix(ctx)}expected response body to equal ${previewText(expected)} but got ${previewText(actualText)}`,
+    )
+  }
+}
+
 /**
  * Assert the response wall-clock duration was at or under `maxMs`. `actualMs` is
  * the measured time for the request (a single attempt unless retry is enabled).

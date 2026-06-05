@@ -226,10 +226,59 @@ client.get<T>(path) / .post / .put / .patch / .delete
   .expectHeader(name, value | RegExp)
   .expectJson(partial)        // subset match
   .expectJsonStrict(value)    // deep-equal
+  .expectText(string | RegExp)// raw text CONTAINS substring / MATCHES RegExp
+  .expectBody(string)         // raw text EXACTLY equals (use '' for empty body)
   .expectSchema(schema)       // Standard Schema (zod/valibot/…) or (body)=>boolean
   .expectUnder(ms)            // latency: response.durationMs <= ms
-  // → await resolves to { status, headers, body, raw, durationMs }
+  // → await resolves to { status, headers, body, text, raw, durationMs }
 ```
+
+**Body reading & `response.text`.** `run()` reads the response body **once as
+text** and exposes it as `response.text: string` (always populated). The parsed
+`body` is then derived: for a JSON content-type it is `JSON.parse(text)`, falling
+back to the raw text on a parse error (a malformed JSON body never throws); for
+any other content-type `body` is the text. JSON parsing behavior is unchanged —
+`text` is simply also available now.
+
+- `.expectText(match)` asserts `response.text` **contains** `match` (string) or
+  **matches** it (`RegExp`) — works for plain text, HTML, etc.
+- `.expectBody(expected)` asserts `response.text` **exactly equals** `expected`;
+  `.expectBody('')` is the empty-body check.
+
+### Retry: delay, backoff, 429 & Retry-After
+
+`RetryOptions` (all new fields optional — backward-compatible):
+
+```ts
+interface RetryOptions {
+  times: number
+  when?: (res: Response) => boolean
+  delayMs?: number                   // base delay BETWEEN attempts; default 0 (immediate)
+  backoff?: 'fixed' | 'exponential'  // default 'fixed'; exponential = delayMs * 2^attemptIndex
+}
+```
+
+- **Delay between attempts** (never before the first): the loop sleeps
+  `computeRetryDelay(attemptIndex, opts, response?)` ms before each retry.
+  `computeRetryDelay` is an exported pure function (unit-testable).
+- **429 in the default policy.** With **no** `when` predicate the default policy
+  now retries **5xx and 429** (Too Many Requests), never other 4xx. Rationale:
+  429 is a legitimate retry case; retry is still opt-in (`times > 0`), and an
+  exhausted 429 still surfaces to assertions. A user-supplied `when` fully
+  overrides this response decision (the framework adds no 5xx/429 on top).
+- **`Retry-After`.** When a retried response carries a `Retry-After` header
+  (delta-seconds **or** HTTP-date), it is used as the wait — overriding
+  `delayMs`/`backoff` for that attempt — capped at **30000ms**.
+- **Transport errors** still always retry; with no response they use
+  `delayMs`/`backoff` only.
+
+### Default request timeout
+
+A module constant `DEFAULT_TIMEOUT_MS = 30_000` is now applied when neither a
+per-request `.timeout(ms)`/`timeoutMs` nor a factory `timeoutMs` is set, so a
+request times out at 30s instead of hanging forever. The effective timeout is
+`per-request ?? factory ?? DEFAULT_TIMEOUT_MS`. **`timeoutMs: 0` is the escape
+hatch** — it disables the timeout (no `AbortSignal` is attached).
 
 The lifecycle (`test`/`describe`/`beforeAll`) comes from the **host runner**
 (`bun:test` by default, or `vitest`). The framework provides only `createClient`,
