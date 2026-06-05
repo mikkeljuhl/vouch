@@ -217,12 +217,15 @@ tests/             # dogfood suite vs public sample API (uses bun:test)
 Dockerfile         # oven/bun base + framework; `docker run -v ./tests ...`
 scripts/
   ci-summary.mjs   # parse JUnit XML → $GITHUB_STEP_SUMMARY table
-bunfig.toml        # (if needed) test config
+tsconfig.json      # typecheck only (`tsc --noEmit`); no emit/build
 ```
 
-The library is consumed **as TypeScript** (Bun and Vitest both run TS directly),
-so no build step is required to use it. A bundled build is only needed if we ever
-publish for non-TS-aware consumers (deferred, §9).
+The library ships **TypeScript source** and is consumed **as TypeScript** (Bun
+and Vitest both run TS directly), so **no build step** exists — the package
+`exports` map points `.` at `./src/index.ts`. There is intentionally **no**
+`tsup.config.ts` (no bundle) and **no** `vitest.config.ts` (Bun is the default
+runner; Vitest is only a documented fallback). A bundled build is only needed if
+we ever publish for non-TS-aware consumers (deferred, §10).
 
 ---
 
@@ -282,27 +285,36 @@ assertion impl, distribution, and CI** — **not** the public API.
 
 ### Migration phases (Node+Vitest → Bun, engine-agnostic)
 
-**M0 — Bun toolchain.** Add Bun; `bunfig.toml` if needed; confirm `bun test`
-discovers the suite. *Exit:* `bun test` runs (even if red).
+**Status: M0–M6 complete.** The framework now runs Bun-first with an
+engine-agnostic core, ships TS source (no build), distributes via a Docker runner
+image + `apitest` CLI, and reports JUnit + a repo-local job summary. The public
+API and runtime semantics are unchanged from the Node+Vitest implementation.
 
-**M1 — Engine-agnostic assertions.** Add `src/assert.ts` (AssertionError +
-matchers); remove the `vitest` `expect` import from `src/builder.ts`. *Exit:*
+**M0 — Bun toolchain.** ✅ Done. Added Bun; `bun test` discovers the suite (no
+`bunfig.toml` needed). *Exit:* `bun test` runs.
+
+**M1 — Engine-agnostic assertions.** ✅ Done. Added `src/assert.ts` (AssertionError
++ matchers); removed the `vitest` `expect` import from `src/builder.ts`. *Exit:*
 `src` has zero test-lib imports; unit behavior preserved.
 
-**M2 — Port tests to `bun:test`.** Switch test imports `vitest` → `bun:test`;
-keep mocked + live coverage. *Exit:* `bun test` green (61 cases equivalent).
+**M2 — Port tests to `bun:test`.** ✅ Done. Switched test imports `vitest` →
+`bun:test`; kept mocked + live coverage. *Exit:* `bun test` green (61 cases).
 
-**M3 — Bun CI + reporting.** Replace the workflow with `oven-sh/setup-bun` +
-`bun test --reporter=junit`; adapt `ci-summary.mjs` to parse JUnit XML. *Exit:*
-PR CI green, annotations + summary render.
+**M3 — Bun CI + reporting.** ✅ Done. Workflow uses `oven-sh/setup-bun` +
+`bun test --reporter=junit`; `ci-summary.mjs` parses JUnit XML. *Exit:* PR CI
+green, annotations + summary render.
 
-**M4 — Docker image.** `Dockerfile` on `oven/bun`; `docker run -v ./tests ...`
-runs the suite. *Exit:* image runs the dogfood suite and emits JUnit.
+**M4 — Docker image.** ✅ Done. `Dockerfile` on `oven/bun`; `docker run -v ./tests …`
+runs the suite and emits JUnit. *Exit:* image runs the dogfood suite.
 
-**M5 — CLI / standalone binary.** `cli/apitest.ts` (`apitest ./tests`); decide
-lean-on-Bun vs embedded collector for `bun build --compile`. *Exit:* `apitest`
+**M5 — CLI / standalone binary.** ✅ Done. `cli/apitest.ts` is a thin wrapper over
+`bun test` (registered as the `apitest` bin); a standalone compiled binary is
+deferred (§10) — Bun's test runner isn't an embeddable API. *Exit:* `apitest`
 runs a tests dir; binary path decision recorded.
 
-**M6 — Cleanup & docs.** Remove Vitest/tsup/Node-matrix leftovers as appropriate
-(keep Vitest only as an optional fallback example); update README. *Exit:* docs
-match the shipped Bun-first reality; Node fallback documented.
+**M6 — Cleanup & docs.** ✅ Done. Removed Vitest/tsup/Node-matrix leftovers
+(`vitest.config.ts`, `tsup.config.ts`, `package-lock.json`, build/prepare scripts,
+the `vitest` peer dep, and the `dist/` build); package now ships TS source via
+`exports → ./src/index.ts`. README rewritten Bun-first; Vitest/`node --test`
+documented as an optional fallback. *Exit:* docs match the shipped Bun-first
+reality; Node fallback documented.

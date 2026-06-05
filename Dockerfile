@@ -18,14 +18,15 @@ FROM oven/bun:1
 
 WORKDIR /app
 
-# Install deps first for layer caching. `bun install` runs the `prepare` script
-# (tsup) to build dist/, which the package's `exports` map points at.
-COPY package.json bun.lock tsconfig.json tsup.config.ts ./
+# Install deps first for layer caching. The package ships TypeScript source —
+# no build step — so there's nothing to compile; deps are dev-only tooling.
+COPY package.json bun.lock tsconfig.json ./
 COPY src ./src
 RUN bun install --frozen-lockfile
 
 # Make the package importable by its published name for mounted user tests:
-# node_modules/@your-org/apitest -> /app, resolved through the exports map.
+# node_modules/@your-org/apitest -> /app, resolved through the exports map
+# (which points at ./src/index.ts — Bun runs the TS source directly).
 RUN mkdir -p node_modules/@your-org && ln -sf /app node_modules/@your-org/apitest
 
 # Bake the dogfood suite + reporting script so `docker run` self-tests by default.

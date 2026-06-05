@@ -1,13 +1,13 @@
 # @your-org/apitest
 
-A reusable TypeScript framework for writing **E2E-style API tests** with a
-fluent request/assertion builder over [Vitest](https://vitest.dev). You create a
-**client** with a base URL and headers, then make requests and assert on
-responses against an **already-deployed** server. There is no config file and no
-environment magic — the `createClient` factory call *is* the configuration. It
-hits real HTTP endpoints with the native `fetch`, supports request **chaining**
-(use one response as the next request's input), and delegates assertions to
-Vitest's `expect` so you get rich diffs and native reporter integration for free.
+A reusable TypeScript framework for **code-authored, E2E-style API tests** against
+an **already-deployed** server. You create a **client** with a base URL and
+headers, then make fluent, awaitable requests and assert on responses. The core
+is **engine-agnostic** — it imports no test runner and assertions throw a plain
+`AssertionError`, so the same suite runs under **Bun** (the default runner),
+Vitest, or `node --test`. There is no config file and no environment magic: the
+`createClient` factory call *is* the configuration, and it hits real HTTP
+endpoints over the native `fetch`.
 
 See [`DESIGN.md`](./DESIGN.md) for the full design and rationale.
 
@@ -15,91 +15,143 @@ See [`DESIGN.md`](./DESIGN.md) for the full design and rationale.
 
 ## Requirements
 
-- **Node 22+** (uses native `fetch`, `AbortSignal.timeout`, `crypto.randomUUID`). Tested on Node 22 and 24 (current LTS lines).
-- **Vitest** as a **peer dependency** — the consumer must have `vitest` installed.
-  The framework imports `expect` from `vitest` and runs inside your Vitest test
-  process, so Vitest is always present at runtime; it is intentionally *not*
-  bundled. Vitest `>=2` is supported.
+- **[Bun](https://bun.sh) 1.x** (default runner). Install:
+
+  ```sh
+  curl -fsSL https://bun.sh/install | bash
+  ```
+
+  Bun runs TypeScript natively (no `tsconfig`/build to run a test), and provides
+  the test runner (`bun:test`), `expect`, and `fetch` out of the box.
+- The package ships **TypeScript source** (no build step). Bun and Vitest both
+  consume TS directly.
+- **Engine-agnostic fallback.** Because the core imports no test library, the same
+  tests also run under **Vitest** or **`node --test`** — a near-free Node escape
+  hatch. The dogfood suite in this repo targets `bun:test`, but consumer suites
+  can import lifecycle helpers from whichever runner they prefer.
 
 ---
 
-## Install
+## Three ways to run
 
-This package is `private` and **not published to a registry yet** (see
-[Deferred / roadmap](#deferred--roadmap)). Consume it via git or a workspace, and
-install `vitest` alongside it.
-
-**From git:**
+### 1. Local (Bun on PATH)
 
 ```sh
-npm i -D vitest "git+https://github.com/your-org/apitest.git"
+bun test                                   # discover + run *.test.ts
+bun test tests/users.test.ts               # a single file
+
+# Or via the bundled CLI (a thin wrapper over `bun test`):
+apitest                                     # = bun test
+apitest tests/users.test.ts
+apitest --junit reports/junit.xml          # expands to Bun's JUnit reporter flags
 ```
 
-A `prepare` script builds `dist/` on install, so a git install produces ready-to-
-import output with no manual build step.
+Set the base URL with an env var your suite reads (see [Quickstart](#quickstart)):
 
-**From a workspace / local path** (monorepo or sibling checkout):
-
-```jsonc
-// package.json
-{
-  "devDependencies": {
-    "@your-org/apitest": "workspace:*", // or "file:../apitest"
-    "vitest": "^4"
-  }
-}
+```sh
+API_BASE_URL=https://your.api bun test
 ```
 
-If you install from a local path checkout, make sure `dist/` exists
-(`npm run build` in the package, or rely on the `prepare` script).
+### 2. Docker (no JS toolchain)
+
+A runner image (`oven/bun` base) with the framework preinstalled, so teams
+without a JavaScript toolchain run tests with one command. Your test files import
+the framework by its package name `@your-org/apitest` (resolved through a
+`node_modules` symlink baked into the image, which points at the shipped TS
+source).
+
+```sh
+docker build -t apitest .
+
+# Self-test: run the baked dogfood suite.
+docker run --rm apitest
+
+# Run YOUR tests by mounting them over /app/tests:
+docker run --rm -v "$PWD/tests:/app/tests" apitest
+
+# Emit JUnit to the host:
+docker run --rm \
+  -v "$PWD/tests:/app/tests" \
+  -v "$PWD/reports:/app/reports" \
+  apitest --reporter=junit --reporter-outfile=/app/reports/junit.xml
+```
+
+### 3. CI (GitHub Actions)
+
+Use `oven-sh/setup-bun`, run `bun test` with the JUnit reporter, then feed the XML
+to the repo-local summary script. This mirrors [`.github/workflows/ci.yml`](./.github/workflows/ci.yml):
+
+```yaml
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: Test
+        run: bun test --reporter=junit --reporter-outfile=reports/junit.xml
+      - name: Job summary + annotations
+        if: always()
+        run: bun scripts/ci-summary.mjs reports/junit.xml
+```
+
+No third-party reporting action is needed — `scripts/ci-summary.mjs` parses the
+JUnit XML into inline annotations plus a `$GITHUB_STEP_SUMMARY` table (see
+[Reporting](#reporting)).
 
 ---
 
 ## Quickstart
 
-A complete minimal suite. The client is created once in `beforeAll`, held in a
+A complete minimal test. The client is created once in `beforeAll`, held in a
 file-scoped variable, and the base URL is read from an env var by the consumer.
 
 ```ts
-import { beforeAll, describe, test } from 'vitest'
+import { test, beforeAll } from 'bun:test'
 import { createClient, type Client } from '@your-org/apitest'
 
-describe('users', () => {
-  let client: Client
+let client: Client
 
-  beforeAll(() => {
-    client = createClient({
-      // Read your own env. Use API_BASE_URL — not BASE_URL, which Vitest reserves
-      // (it injects its own `base`, default "/"). `||` guards an empty-string env.
-      baseUrl: process.env.API_BASE_URL || 'https://jsonplaceholder.typicode.com',
-      headers: {
-        // Auth is just a header callable, resolved per request (see below).
-        Authorization: () => `Bearer ${process.env.API_TOKEN ?? 'demo-token'}`,
-        'X-Test-Run': 'apitest-quickstart',
-      },
-      timeoutMs: 10_000,
-      retry: { times: 0 }, // off by default; opt in per call
-    })
+beforeAll(() => {
+  client = createClient({
+    // Read your own env. Use API_BASE_URL — NOT BASE_URL, which Vite/Vitest
+    // reserves. `||` guards an empty-string env.
+    baseUrl: process.env.API_BASE_URL || 'https://jsonplaceholder.typicode.com',
+    headers: {
+      // Auth is just a header callable, resolved per request (see API reference).
+      Authorization: () => `Bearer ${process.env.API_TOKEN ?? 'demo-token'}`,
+      'X-Test-Run': 'apitest-quickstart',
+    },
+    timeoutMs: 10_000,
   })
+})
 
-  test('GET /users/1', async () => {
-    const res = await client
-      .get<{ id: number; username: string }>('/users/1')
-      .expectStatus(200)
-      .expectHeader('content-type', /application\/json/)
-      .expectJson({ id: 1 }) // partial / subset match
+test('GET /users/1', async () => {
+  const res = await client
+    .get<{ id: number; username: string }>('/users/1')
+    .expectStatus(200)
+    .expectHeader('content-type', /application\/json/)
+    .expectJson({ id: 1 }) // partial / subset match
 
-    // The awaited builder resolves to a typed response.
-    console.log(res.body.username)
-  })
+  // The awaited builder resolves to a typed response.
+  console.log(res.body.username)
 })
 ```
 
 Run it:
 
 ```sh
-API_BASE_URL=https://your.api npx vitest run
+API_BASE_URL=https://your.api bun test
 ```
+
+> **Env var name — `API_BASE_URL`, not `BASE_URL`.** Vite/Vitest reserves
+> `BASE_URL`. Using `API_BASE_URL` keeps a suite running identically under Bun or
+> Vitest. Consumers may name their own vars anything.
 
 ---
 
@@ -142,9 +194,9 @@ interface ClientOptions {
   Per-request `.headers()` override factory headers; names are matched
   case-insensitively and the override wins on collision.
 - **`timeoutMs`** — default per-request timeout via `AbortSignal.timeout`,
-  overridable per call with `.timeout(ms)`.
+  overridable per call with `.timeout(ms)`. No default if omitted.
 - **`retry`** — default retry policy, overridable per call with `.retry(...)`.
-  Omit it (or use `{ times: 0 }`) for no retries.
+  Omit it (or use `{ times: 0 }`) for no retries. See [Retry semantics](#retry-semantics).
 
 The returned `Client` exposes `get`/`post`/`put`/`patch`/`delete<T>(path)`, each
 returning a fluent `RequestBuilder<T>`. (It also exposes the lower-level
@@ -165,17 +217,24 @@ until you `await` the builder (or call `.send()`).
 | `.retry({ times, when })` | Set the retry policy for this request (overrides the factory default). |
 | `.expectStatus(code)` | Assert the response status equals `code`. |
 | `.expectHeader(name, value)` | Assert a response header equals a string or matches a `RegExp`. |
-| `.expectJson(partial)` | **Partial** match — body contains `partial` (Vitest `toMatchObject`). |
-| `.expectJsonStrict(value)` | **Strict** match — body deep-equals `value` (Vitest `toEqual`). |
+| `.expectJson(partial)` | **Partial** match — body contains `partial` (deep subset). |
+| `.expectJsonStrict(value)` | **Strict** match — body deep-equals `value`. |
 | `.send()` | Perform the request and resolve to the response (same as `await`). |
 
 **Partial vs strict:** `.expectJson({ id: 1 })` passes as long as the body
 *contains* `{ id: 1 }`, ignoring other fields — ideal for large/nested bodies.
-`.expectJsonStrict(value)` requires an exact deep-equal of the whole body.
+Arrays are matched element-wise and must be the same length. `.expectJsonStrict(value)`
+requires an exact deep-equal of the whole body.
 
 **Fail-fast:** assertions run in declared order against the settled response; the
-first failing `expect` throws and rejects the awaited builder, so no later
-assertion runs. Failures surface as Vitest assertion errors with diffs.
+first failing assertion throws an **`AssertionError`** and rejects the awaited
+builder, so no later assertion runs. The error message names the request
+(`METHOD url`), the expected, and the actual values.
+
+> **Caveat (Bun JUnit):** Bun's `--reporter=junit` emits a `<failure>` element
+> without the assertion message text — the full `AssertionError` message (expected
+> vs. actual) appears in the **run log**, not the XML. The summary script surfaces
+> the per-test failure; check the job log for the detailed message.
 
 Awaiting a builder resolves to an `ApiResponse<T>`:
 
@@ -191,7 +250,7 @@ interface ApiResponse<T> {
 ### Chaining
 
 Share state via plain awaited response objects — no template store or magic
-interpolation:
+interpolation. Await one response, then use its body in the next call:
 
 ```ts
 const user = await client.get<User>('/users/1').expectStatus(200)
@@ -200,7 +259,7 @@ const posts = await client
   .get<Post[]>('/posts')
   .query({ userId: user.body.id }) // use the previous response's body
   .expectStatus(200)
-  .expectJson([]) // partial: just assert it's array-shaped, contents aside
+  .expectJson([]) // partial: assert it's array-shaped, contents aside
 ```
 
 ---
@@ -233,38 +292,38 @@ await client
 
 ## Reporting
 
-The framework ships **no custom reporter**. It relies on Vitest's built-in
-`junit` reporter; the emitted XML is consumed by an external GitHub Action the
-team already maintains (no packaged action yet). Wire it in your `vitest.config.ts`:
+The framework ships **no third-party reporter action**. It relies on Bun's
+built-in `junit` reporter:
 
-```ts
-import { defineConfig } from 'vitest/config'
-
-export default defineConfig({
-  test: {
-    reporters: ['default', 'junit'], // keep console output readable too
-    outputFile: { junit: './reports/junit.xml' },
-    retry: 1, // Vitest runner-level retry; distinct from .retry() per request
-  },
-})
+```sh
+bun test --reporter=junit --reporter-outfile=reports/junit.xml
 ```
 
-Note that Vitest's runner-level `retry` (re-runs a whole failing test) is
-**distinct** from the framework's per-request `.retry({ times, when })` (re-issues
-a single HTTP call before assertions run).
+The emitted XML is consumed by the repo-local, dependency-free
+[`scripts/ci-summary.mjs`](./scripts/ci-summary.mjs), which parses it into:
+
+- **Inline annotations** (GitHub `::error`/`::warning` log commands), and
+- a **`$GITHUB_STEP_SUMMARY`** Markdown table (totals, per-file breakdown,
+  collapsed failure details).
+
+Wire it in CI as shown in [Three ways to run → CI](#3-ci-github-actions). The
+script is repo-local and not shipped in the package.
 
 ---
 
-## Deferred / roadmap
+## Roadmap / deferred
 
-Out of MVP scope, designed not to be precluded (see `DESIGN.md` §9):
+Out of MVP scope, designed not to be precluded (see [`DESIGN.md`](./DESIGN.md) §10):
 
 - **Packaged GitHub Action / reusable workflow** — wrap setup/run/report.
-- **Packaged reporter** — markdown job summary (`$GITHUB_STEP_SUMMARY`),
-  GHA annotations beyond raw JUnit.
-- **Docker runner / portability** — a base runner image for non-GHA CI.
-- **JSON-schema & latency assertions** — `.expectSchema(...)`, `.expectUnder(ms)`.
+- **Standalone compiled binary** (`bun build --compile`) — a true install-nothing
+  artifact; needs a small homegrown test collector (Bun's runner isn't an
+  embeddable API). Docker is the install-nothing path for now.
+- **Bundled build for non-TS-aware consumers** — the package currently ships TS
+  source; a compiled `dist/` is only needed for non-TS publishers.
+- **JSON-schema & latency/SLA assertions** — `.expectSchema(...)`, `.expectUnder(ms)`.
 - **Form/multipart/raw bodies** — file uploads, urlencoded, binary.
-- **Named variable store** — declarative `extract` / `{{interpolation}}` for a
-  future YAML-style format.
-- **Registry publishing** — GitHub Packages / npm once the API stabilizes.
+- **Injectable matcher hook** — for runner-native diffs.
+- **Named variable store** / declarative format.
+- **Native per-language SDKs** (Java/Go/etc.) — only if an org forces it.
+- **Registry publishing** — once the API stabilizes.

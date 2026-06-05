@@ -330,7 +330,8 @@ describe('RequestBuilder retry (mocked fetch)', () => {
 /**
  * Live integration tests against a public API (jsonplaceholder). These run by
  * default; if the network is unavailable they fail loudly rather than silently
- * passing. Run `vitest --exclude '**\/*.integration*'`-style filtering offline.
+ * passing. Filter them out offline with `bun test --test-name-pattern` (or run
+ * only the mocked suites).
  */
 describe('RequestBuilder (live: jsonplaceholder)', () => {
   const live = createClient({ baseUrl: 'https://jsonplaceholder.typicode.com', timeoutMs: 15_000 })
