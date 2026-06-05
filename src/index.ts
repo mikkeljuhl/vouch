@@ -10,3 +10,5 @@ export type {
   HttpMethod,
 } from './client'
 export type { RequestBuilder, ApiResponse } from './builder'
+export { AssertionError } from './assert'
+export type { AssertContext } from './assert'

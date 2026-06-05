@@ -12,7 +12,7 @@
  * — and assert the merged result. This passes against the real API.
  */
 
-import { beforeAll, describe, expect, test } from 'vitest'
+import { beforeAll, describe, expect, test } from 'bun:test'
 import { createClient, type Client } from '../../src/index'
 import type { Post } from './types'
 

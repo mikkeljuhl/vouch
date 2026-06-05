@@ -5,14 +5,20 @@
  * performs the request once, then runs the queued assertions fail-fast and
  * resolves to a typed `ApiResponse<T>`.
  *
- * Assertions delegate to Vitest's `expect` so failures produce rich diffs and
- * integrate with the reporter (DESIGN.md §8). Because `expect` throws on the
- * first failure and assertions run in declared order, fail-fast falls out for
- * free — the first failing assertion's throw rejects the awaited builder and no
- * later assertion runs.
+ * Assertions delegate to the engine-agnostic matchers in `./assert`, which throw
+ * a clear `AssertionError` on mismatch (DESIGN.md §5). Because a matcher throws
+ * on the first failure and assertions run in declared order, fail-fast falls out
+ * for free — the first failing assertion's throw rejects the awaited builder and
+ * no later assertion runs. The core imports no test library.
  */
 
-import { expect } from 'vitest'
+import {
+  assertHeader,
+  assertJson,
+  assertJsonStrict,
+  assertStatus,
+  type AssertContext,
+} from './assert'
 import type { Client, HeaderValue, HttpMethod, RetryOptions, RequestOptions } from './client'
 
 /** The typed response object an awaited builder resolves to (DESIGN.md §3). */
@@ -27,8 +33,11 @@ export interface ApiResponse<T> {
   raw: Response
 }
 
-/** A queued assertion: runs against the resolved response, throwing on failure. */
-type Assertion<T> = (res: ApiResponse<T>) => void
+/**
+ * A queued assertion: runs against the resolved response and a context carrying
+ * the request `{ method, url }` for error messages; throws on failure.
+ */
+type Assertion<T> = (res: ApiResponse<T>, ctx: AssertContext) => void
 
 /**
  * A fluent, awaitable request builder. Configuration methods and assertion
@@ -131,34 +140,30 @@ export function createRequestBuilder<T>(
     },
 
     expectStatus(code) {
-      assertions.push((res) => {
-        expect(res.status).toBe(code)
+      assertions.push((res, ctx) => {
+        assertStatus(ctx, code, res.status)
       })
       return this
     },
 
     expectHeader(name, value) {
-      assertions.push((res) => {
-        const actual = res.headers.get(name)
-        if (value instanceof RegExp) {
-          expect(actual).toMatch(value)
-        } else {
-          expect(actual).toBe(value)
-        }
+      assertions.push((res, ctx) => {
+        // Header lookup stays case-insensitive via the native `Headers.get`.
+        assertHeader(ctx, name, value, res.headers.get(name))
       })
       return this
     },
 
     expectJson(partial) {
-      assertions.push((res) => {
-        expect(res.body).toMatchObject(partial as object)
+      assertions.push((res, ctx) => {
+        assertJson(ctx, partial, res.body)
       })
       return this
     },
 
     expectJsonStrict(value) {
-      assertions.push((res) => {
-        expect(res.body).toEqual(value)
+      assertions.push((res, ctx) => {
+        assertJsonStrict(ctx, value, res.body)
       })
       return this
     },
@@ -242,9 +247,11 @@ export function createRequestBuilder<T>(
       body: parsed,
       raw,
     }
-    // Fail-fast: run in declared order; the first failing expect throws.
+    // Context for assertion messages: the same URL fetch was sent to.
+    const ctx: AssertContext = { method, url: client.resolveUrl(path, query) }
+    // Fail-fast: run in declared order; the first failing matcher throws.
     for (const assertion of assertions) {
-      assertion(response)
+      assertion(response, ctx)
     }
     return response
   }

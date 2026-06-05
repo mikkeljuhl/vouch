@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 import { createClient, joinUrl, resolveHeaders } from '../src/client'
 
 describe('joinUrl', () => {
@@ -79,15 +79,18 @@ describe('createClient', () => {
   })
 
   describe('_request (with mocked fetch)', () => {
-    let fetchMock: ReturnType<typeof vi.fn>
+    // Save the real fetch and restore it after each test so a stubbed fetch can
+    // never leak into the live `tests/example` suite (restoration is essential).
+    const realFetch = globalThis.fetch
+    let fetchMock: ReturnType<typeof mock>
 
     beforeEach(() => {
-      fetchMock = vi.fn(async () => new Response('ok', { status: 200 }))
-      vi.stubGlobal('fetch', fetchMock)
+      fetchMock = mock(async () => new Response('ok', { status: 200 }))
+      globalThis.fetch = fetchMock as unknown as typeof fetch
     })
 
     afterEach(() => {
-      vi.unstubAllGlobals()
+      globalThis.fetch = realFetch
     })
 
     test('sends resolved headers and joined URL', async () => {

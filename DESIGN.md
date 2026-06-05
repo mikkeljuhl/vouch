@@ -1,121 +1,91 @@
 # API Testing Framework — Design
 
-A reusable TypeScript package providing a fluent request/assertion builder over
-**Vitest**, for E2E-style testing against **already-deployed** servers.
+A reusable TypeScript framework for **code-authored**, E2E-style API testing
+against **already-deployed** servers. You create a **client** with a base URL and
+headers, then make fluent, awaitable requests and assert on responses.
 
-The framework is a thin, explicit library: you create a **client** with a base
-URL and headers, then make requests and assert on responses. No config files, no
-environment magic — the client factory *is* the configuration.
+The framework has an **engine-agnostic core** (no dependency on any test runner)
+and runs by default under **Bun** — chosen so that getting started costs as
+little as possible. It is distributed as a **Docker image** and a **CLI** so even
+teams without a JavaScript toolchain can run tests with one command.
 
-This repo holds both the framework package and a dogfooding example suite that
-runs against a public sample API so CI continuously self-tests the framework.
+This repo holds both the framework and a dogfooding example suite that runs
+against a public sample API so CI continuously self-tests the framework.
 
 ---
 
-## 1. Goals & non-goals
+## 1. Adoption thesis (why these choices)
+
+The audience is **polyglot backend engineers** (Node *and* Java/Go/etc. services)
+who must be able to write tests **without much hassle**. Three goals drive
+everything: (1) a nice API, (2) minimal CI setup, (3) minimal local setup.
+
+- **Code, not declarative.** Tests need real logic — loops, branching, reuse,
+  chaining. A fluent code API expresses this directly; a declarative format would
+  need an ever-growing expression sublanguage. Authoring stays in code.
+- **One shared language, not per-language SDKs.** A single tool means one CI
+  pattern, one set of docs, one thing to maintain. The cost ("it's TS, not
+  Java") is a one-time shrug *once setup is near-zero* and the API is intuitive.
+  Native per-language SDKs are explicitly **out of scope** (revisit only if a
+  non-JS org genuinely refuses to touch JS).
+- **Bun to kill setup friction.** Bun runs TS natively (no `tsconfig`/build to
+  run), with a built-in test runner, `expect`, and `fetch`. Local is `bun test`;
+  CI is `setup-bun` + `bun test`. This is the biggest lever for goals 2 & 3.
+- **Engine-agnostic core for safety.** The core never imports a test library;
+  assertions throw a plain error (which fails the test under *any* runner). Bun
+  is the default, but the framework still runs under Vitest or `node --test` —
+  a near-free hedge that preserves a Node escape hatch.
+- **Docker + CLI distribution.** Non-Node teams shouldn't install a JS toolchain:
+  a Docker image (`oven/bun` base) and a CLI cover laptops and CI alike.
+
+---
+
+## 2. Goals & non-goals
 
 ### Goals
-- Define API test cases as readable TypeScript using a fluent chain builder.
+- Define API test cases as readable, code-authored TypeScript (fluent builder).
 - Run them like UI E2E tests: against a real, already-running server.
 - Make assertions on responses (status, headers, JSON body).
 - Support request **chaining** — use one response's output as the next's input.
-- Be reusable across repos as an importable module.
-- Emit JUnit so an external CI/GHA can report results.
+- Minimal setup locally and in CI; usable by non-Node teams via Docker/CLI.
+- Emit JUnit so any CI can report results.
 
 ### Non-goals (for now — see [§9 Deferred](#9-deferred))
-- A from-scratch test runner (we build on Vitest).
+- A from-scratch test runner (we use the host runner — Bun by default).
 - Booting/managing the target server (we hit a deployed URL).
 - Any config file, environments map, or `TEST_ENV` selection.
 - A dedicated auth concept (auth is just a header — see [§4](#4-the-client-factory)).
-- A packaged GitHub Action / reusable workflow.
-- A custom/packaged reporter (rely on Vitest's JUnit + an external GHA).
-- Docker runner / cross-CI portability.
+- **Native per-language SDKs** (one shared language only).
 - JSON-schema and latency/SLA assertions.
 - Form/multipart/binary request bodies.
-- A declarative YAML format or named-variable template store.
+- A declarative format or named-variable template store.
 
 ---
 
-## 2. Core decisions
+## 3. Core decisions
 
 | Area | Decision |
 |---|---|
-| **Approach** | Custom fluent DSL over an existing engine (not a from-scratch runner) |
-| **Engine** | Vitest |
-| **Language** | TypeScript / Node 22+ (tested on 22 & 24 LTS) |
+| **Approach** | Custom fluent DSL with an **engine-agnostic** core (no test-lib dependency) |
+| **Default runner** | **Bun** (`bun test`); also runs under Vitest / `node --test` |
+| **Language** | TypeScript (run natively by Bun; no build step to run) |
 | **Authoring** | Code — TS test files using a fluent chain builder |
 | **Target** | Already-running deployed env (base URL + headers) |
 | **Client** | `createClient({ baseUrl, headers, ...defaults })` factory; instance exposes the builder |
 | **Client lifecycle** | Created by the user in `beforeAll` (or similar), held in a file-scoped variable |
 | **Config** | None — the factory call is the config; users read their own env vars and pass them in |
 | **HTTP client** | Native `fetch`, generic body typing: `client.get<User>('/u/1')` |
-| **Headers** | `Record<string, string \| (() => string \| Promise<string>)>`; callables are awaited **per request** |
-| **Auth** | No dedicated concept — auth is a header whose value is a callable (e.g. `Authorization: () => ...`) |
+| **Headers** | `Record<string, string \| (() => string \| Promise<string>)>`; callables awaited **per request** |
+| **Auth** | No dedicated concept — auth is a header whose value is a callable |
 | **Assertions** | Status, headers, JSON body (deep & partial) — MVP |
-| **Assert semantics** | Fail-fast, delegating to Vitest's `expect` (rich diffs, native reporter integration) |
-| **Chaining** | First-class; state shared via `await`-resolved response objects (plain JS vars, no template store) |
-| **Concurrency** | Files parallel, chains serial, test-level retries — configurable in the example's vitest.config |
+| **Assert impl** | **Built-in, engine-agnostic** — throws a clear `AssertionError` (expected/actual); a thrown error fails any runner. Fail-fast. |
+| **Chaining** | First-class; state shared via `await`-resolved response objects (plain JS vars) |
+| **Concurrency** | Test files run in parallel; chains stay serial (plain `await`); runner-level retry for flake |
 | **Per-request retry** | Factory default + per-call override via predicate: `.retry({ times, when })`, opt-in |
 | **Per-request timeout** | Factory default + per-call override via `.timeout(ms)` |
-| **Reporting** | JUnit output only (Vitest built-in), consumed by an external GHA the team already has |
+| **Reporting** | JUnit (Bun's built-in `--reporter=junit`) + a first-party job-summary script that parses the JUnit XML |
+| **Distribution** | (a) library consumed as TS via `bun add`; (b) **Docker image** (`oven/bun`); (c) **CLI** |
 | **Example suite** | Runs against a public sample API (jsonplaceholder / httpbin) |
-| **Build/dist** | `tsup` (ESM+CJS+d.ts); `vitest` is an **external/peer** dep (not bundled); consumed via git/workspace for now (no registry yet) |
-
----
-
-## 3. Authoring experience
-
-```ts
-import { describe, test, beforeAll } from 'vitest'
-import { createClient, type Client } from '@your-org/apitest'
-
-describe('users', () => {
-  let client: Client
-
-  beforeAll(() => {
-    client = createClient({
-      baseUrl: process.env.API_BASE_URL!,       // user reads their own env (see note)
-      headers: {
-        Authorization: () => `Bearer ${process.env.API_TOKEN}`, // callable, per-request
-        'X-Test-Run': crypto.randomUUID(),                      // static
-      },
-      timeoutMs: 10_000,
-      retry: { times: 0 },                       // default; opt-in per call
-    })
-  })
-
-  test('create user, then fetch it', async () => {
-    const created = await client
-      .post('/users')
-      .json({ name: 'Ada', email: `ada+${crypto.randomUUID()}@ex.com` })
-      .expectStatus(201)
-      .expectHeader('content-type', /json/)
-
-    const id = created.body.id
-
-    await client
-      .get<{ id: string; name: string }>(`/users/${id}`)
-      .query({ expand: 'profile' })
-      .retry({ times: 2, when: (r) => r.status >= 500 })
-      .expectStatus(200)
-      .expectJson({ name: 'Ada' })   // partial / subset match
-  })
-})
-```
-
-> **Env var name — `API_BASE_URL`, not `BASE_URL`.** Vite/Vitest reserves
-> `BASE_URL` (it injects its own `base`, default `"/"`, into the worker's
-> `process.env`), which would silently override a consumer's value. The example
-> suite and all docs therefore read `API_BASE_URL`. Consumers are free to name
-> their own env vars anything — this is only a convention to avoid the collision.
-
-Key properties:
-- The **client factory is the configuration** — no config file, no env selection.
-- A builder is **awaitable**; awaiting performs the request, runs assertions
-  fail-fast, and resolves to a typed response (`{ status, headers, body, raw }`).
-- Chaining is plain TypeScript — no template interpolation or magic store.
-- The client is created in `beforeAll` and shared via a file-scoped variable.
-- Multiple clients can coexist in a file (different base URLs / headers).
 
 ---
 
@@ -137,10 +107,49 @@ function createClient(opts: ClientOptions): Client
 - **Headers** merge precedence: per-request `.headers()` > factory `headers`.
 - **Header callables** (sync or async) are resolved **per request** and awaited.
   This is the whole auth story: a token-bearing header is just a callable; the
-  user caches inside the callable if they don't want per-request cost. A login
-  step minted in `beforeAll` is captured by the closure.
-- **Defaults** (`timeoutMs`, `retry`) are overridable per request via
-  `.timeout()` / `.retry()`.
+  user caches inside the callable if they don't want per-request cost.
+- **Defaults** (`timeoutMs`, `retry`) are overridable per request.
+
+### Authoring example
+
+```ts
+import { describe, test, beforeAll } from 'bun:test'   // or 'vitest'
+import { createClient, type Client } from '@your-org/apitest'
+
+describe('users', () => {
+  let client: Client
+
+  beforeAll(() => {
+    client = createClient({
+      baseUrl: process.env.API_BASE_URL!,    // see env-var note below
+      headers: {
+        Authorization: () => `Bearer ${process.env.API_TOKEN}`, // per-request
+        'X-Test-Run': crypto.randomUUID(),                      // static
+      },
+      timeoutMs: 10_000,
+    })
+  })
+
+  test('create user, then fetch it', async () => {
+    const created = await client
+      .post('/users')
+      .json({ name: 'Ada' })
+      .expectStatus(201)
+
+    const id = created.body.id
+
+    await client
+      .get<{ id: string; name: string }>(`/users/${id}`)
+      .retry({ times: 2, when: (r) => r.status >= 500 })
+      .expectStatus(200)
+      .expectJson({ name: 'Ada' })   // partial / subset match
+  })
+})
+```
+
+> **Env var name — `API_BASE_URL`, not `BASE_URL`.** Vite/Vitest reserves
+> `BASE_URL`. We keep `API_BASE_URL` as a convention so the example suite runs
+> identically under Bun or Vitest. Consumers may name their own vars anything.
 
 ### Client / builder surface
 
@@ -158,127 +167,142 @@ client.get<T>(path) / .post / .put / .patch / .delete
   // → await resolves to { status, headers, body, raw }
 ```
 
+The lifecycle (`test`/`describe`/`beforeAll`) comes from the **host runner**
+(`bun:test` by default, or `vitest`). The framework provides only `createClient`,
+the builder, and the assertions.
+
 ---
 
-## 5. Architecture
+## 5. Engine-agnostic assertions
+
+The core imports **no** test library. Each `expect*` method evaluates against the
+settled response and, on mismatch, throws an `AssertionError` with a clear
+message (method, URL, expected, actual). Because every runner treats a thrown
+error as a failing test, the same suite runs under Bun, Vitest, or `node --test`.
+
+- **Fail-fast:** the first failing expectation throws; later ones don't run.
+- **Trade-off vs. wrapping a runner's `expect`:** we forgo library-native diffs,
+  so we craft explicit expected/actual messages ourselves. A future option is an
+  injectable matcher hook for richer diffs, but the default stays dependency-free.
+
+---
+
+## 6. Architecture
 
 ```
-RequestBuilder ──builds──▶ fetch ──response──▶ assertions (Vitest expect)
+RequestBuilder ──builds──▶ fetch ──response──▶ built-in assertions (throw on fail)
       ▲                                                  │
       │ from                                             ▼
-   Client (baseUrl, headers[callables resolved per req], defaults)
-      ▲                                            fail-fast throw
+   Client (baseUrl, headers[callables per req], defaults)   fail-fast throw
+      ▲
       │ created by user in beforeAll
    createClient(opts)
 
-Vitest run ──▶ junit reporter (built-in) ──▶ external GHA reports
+host runner (bun test | vitest) ──▶ JUnit reporter ──▶ job-summary script ──▶ CI
 ```
 
 ---
 
-## 6. Package layout
+## 7. Package & repo layout
 
 ```
 src/
   client.ts        # createClient(opts) → fetch wrapper: base url, header resolution, defaults
   builder.ts       # fluent RequestBuilder: methods, query, headers, retry, timeout, expect*
+  assert.ts        # engine-agnostic AssertionError + matchers (status/header/json)
   index.ts         # public exports (createClient, types)
-tests/             # dogfood suite vs public sample API
-vitest.config.ts   # example wiring: junit reporter, parallel files, retries
-tsup.config.ts
+cli/
+  apitest.ts       # CLI entry: discover + run *.test.ts (Bun)
+tests/             # dogfood suite vs public sample API (uses bun:test)
+Dockerfile         # oven/bun base + framework; `docker run -v ./tests ...`
+scripts/
+  ci-summary.mjs   # parse JUnit XML → $GITHUB_STEP_SUMMARY table
+bunfig.toml        # (if needed) test config
 ```
 
----
-
-## 7. Reporting
-
-MVP emits **JUnit XML** via Vitest's built-in `junit` reporter (wired in the
-example repo's `vitest.config.ts`). The team's existing (unpackaged) GitHub
-Action consumes that output. The framework ships no custom reporter and no
-packaged action; packaging reporting is a later step.
+The library is consumed **as TypeScript** (Bun and Vitest both run TS directly),
+so no build step is required to use it. A bundled build is only needed if we ever
+publish for non-TS-aware consumers (deferred, §9).
 
 ---
 
-## 8. Design notes & tensions
+## 8. Reporting
 
-- **Auth is not special.** Folding auth into header callables removes an entire
-  concept: any scheme (Bearer, custom headers, rotating tokens) is expressed as a
-  per-request callable. Async support covers network token minting.
+- **JUnit** via Bun's built-in `--reporter=junit` (the canonical machine output;
+  any CI can parse it).
+- **Job summary** via `scripts/ci-summary.mjs`, a dependency-free script that
+  parses the JUnit XML into a `$GITHUB_STEP_SUMMARY` Markdown table (totals,
+  per-file breakdown, collapsed failure details). Repo-local, not shipped.
+- A packaged reusable action stays deferred (§9); CI wires the steps directly.
+
+---
+
+## 9. Design notes & tensions
+
+- **Auth is not special.** Any scheme is a per-request header callable; async
+  support covers network token minting.
 - **Fail-fast + per-request retry coexist cleanly.** Retry handles transient
-  transport/5xx *before* assertions evaluate; fail-fast governs assertion
-  evaluation after a response settles. Retry is **opt-in (off by default)** so a
-  real 4xx is never masked.
-- **Wrapping Vitest `expect`** gives rich diffs and native reporter integration
-  for free, and is naturally consistent with fail-fast (expect throws on first
-  failure).
-- **No config file / no env selection.** The factory call carries everything;
-  env-var reading is the consumer's responsibility. Fewer abstractions, fully
-  explicit, trivially supports multiple clients per file.
-- **Cleanup is the consumer's job.** Use Vitest's `beforeAll`/`afterEach`/
-  `afterAll`; the framework imposes no data-lifecycle policy.
+  transport/5xx *before* assertions evaluate; fail-fast governs evaluation after
+  the response settles. Retry is **opt-in** so a real 4xx is never masked.
+- **Engine-agnostic core, Bun default.** Bun minimizes setup; the dependency-free
+  assertion layer preserves a Node/Vitest fallback at near-zero cost.
+- **One language is a deliberate adoption bet.** We minimize friction via setup
+  (Bun/Docker/CLI) and scaffolding rather than N native SDKs.
+- **Standalone-binary risk.** A Docker image is a reliable zero-install artifact.
+  A single compiled binary (`bun build --compile`) is appealing but must run the
+  *user's* TS files — Bun's `bun test` runner isn't an embeddable programmatic
+  API, so a true install-nothing binary needs a small homegrown collector. Hence
+  **Docker first, standalone binary as a fast-follow** (see migration M5).
 
 ---
 
-## 9. Deferred
+## 10. Deferred
 
-Out of MVP scope, designed not to be precluded:
+Out of scope now, designed not to be precluded:
 
-- **Packaged GitHub Action / reusable workflow** — wrap setup/run/report.
-- **Packaged reporter** — custom markdown job summary (`$GITHUB_STEP_SUMMARY`),
-  GHA annotations beyond raw JUnit.
-- **Docker runner / portability** — a base runner image for non-GHA CI.
+- **Native per-language SDKs** (Java/Go/etc.) — only if an org forces it.
+- **Packaged GitHub Action / reusable workflow.**
+- **Bundled build for non-TS-aware consumers** (currently shipped as TS source).
 - **JSON-schema & latency assertions** — `.expectSchema(...)`, `.expectUnder(ms)`.
 - **Form/multipart/raw bodies** — file uploads, urlencoded, binary.
-- **Named variable store** — declarative `extract`/`{{interpolation}}` for a
-  future YAML-style format.
-- **Registry publishing** — GitHub Packages / npm once the API stabilizes.
+- **Injectable matcher hook** for runner-native diffs.
+- **Named variable store** / declarative format.
+- **Registry publishing** — once the API stabilizes.
 
 ---
 
-## 10. Implementation phases
+## 11. Implementation status & migration
 
-### Phase 0 — Project scaffold
-- `git init`; `package.json`, `tsconfig.json`, `tsup.config.ts`, `.gitignore`.
-- Add Vitest + tsup dev deps; Node 22+ engines field.
-- **Exit:** `npm run build` and `npm test` (no tests yet) run clean.
+### Already implemented (on Node + Vitest)
+The full framework exists and is green: `createClient` + fluent builder
+(query/headers/json/timeout/retry), assertions, opt-in retry (5xx-only default,
+transport always, caller predicate), a live dogfood suite, JUnit + a job-summary
+script, and PR CI on a Node 22/24 matrix. The pivot below changes the **runner,
+assertion impl, distribution, and CI** — **not** the public API.
 
-### Phase 1 — Client factory
-- `createClient(opts)`: base URL join, default headers, defaults (timeout/retry).
-- Header resolution: static strings + sync/async callables awaited per request,
-  with per-request override precedence.
-- **Exit:** a unit test constructs a client and a request carries resolved headers.
+### Migration phases (Node+Vitest → Bun, engine-agnostic)
 
-### Phase 2 — Fluent builder (core)
-- `RequestBuilder` with methods, `.query()`, `.headers()`, `.json()`,
-  `.timeout()`; awaitable → typed `{ status, headers, body, raw }`.
-- Assertions wrapping Vitest `expect`: `.expectStatus`, `.expectHeader`,
-  `.expectJson` (partial) + `.expectJsonStrict` (deep). Fail-fast.
-- Generic body typing (`client.get<T>`).
-- **Exit:** a chained create→fetch test passes against a public API.
+**M0 — Bun toolchain.** Add Bun; `bunfig.toml` if needed; confirm `bun test`
+discovers the suite. *Exit:* `bun test` runs (even if red).
 
-### Phase 3 — Per-request retry
-- `.retry({ times, when })`, opt-in, factory default + per-call override, applied
-  before assertions.
-- **Exit:** retry triggers on a forced/simulated 5xx and not on 4xx.
+**M1 — Engine-agnostic assertions.** Add `src/assert.ts` (AssertionError +
+matchers); remove the `vitest` `expect` import from `src/builder.ts`. *Exit:*
+`src` has zero test-lib imports; unit behavior preserved.
 
-### Phase 4 — Example / dogfood suite + JUnit
-- `tests/` against a public sample API (jsonplaceholder / httpbin) exercising
-  chaining, query/headers (incl. a callable header), retry, all assertions.
-- `vitest.config.ts` enables the junit reporter; parallel files, test retries.
-- **Exit:** the suite runs green locally and emits JUnit XML.
+**M2 — Port tests to `bun:test`.** Switch test imports `vitest` → `bun:test`;
+keep mocked + live coverage. *Exit:* `bun test` green (61 cases equivalent).
 
-### Phase 5 — Packaging & docs
-- `tsup` build (ESM+CJS+d.ts), conditional `exports` map (`import`/`require`/
-  `types`) + `main`/`module`/`types` for older resolvers, `files: ["dist"]`,
-  `sideEffects: false`.
-- `vitest` is a **peer dependency** and is marked **external** in tsup so its
-  matcher machinery (~560KB) is not bundled — the output keeps a bare
-  `import { expect } from 'vitest'` resolved against the consumer's Vitest. (It
-  also stays a devDep so this repo's own tests run.)
-- A `prepare` script runs the build so a `npm install <git-url>` consumer gets
-  built `dist/` without a manual build step.
-- Consumed via git/workspace (`private: true`, no registry yet); registry
-  publishing is the documented future path (§9).
-- README with quickstart + API reference, accurate to the shipped surface.
-- **Exit:** another repo can import `createClient` and run a minimal suite
-  (verified via `npm pack` + install into a separate consumer dir).
+**M3 — Bun CI + reporting.** Replace the workflow with `oven-sh/setup-bun` +
+`bun test --reporter=junit`; adapt `ci-summary.mjs` to parse JUnit XML. *Exit:*
+PR CI green, annotations + summary render.
+
+**M4 — Docker image.** `Dockerfile` on `oven/bun`; `docker run -v ./tests ...`
+runs the suite. *Exit:* image runs the dogfood suite and emits JUnit.
+
+**M5 — CLI / standalone binary.** `cli/apitest.ts` (`apitest ./tests`); decide
+lean-on-Bun vs embedded collector for `bun build --compile`. *Exit:* `apitest`
+runs a tests dir; binary path decision recorded.
+
+**M6 — Cleanup & docs.** Remove Vitest/tsup/Node-matrix leftovers as appropriate
+(keep Vitest only as an optional fallback example); update README. *Exit:* docs
+match the shipped Bun-first reality; Node fallback documented.
