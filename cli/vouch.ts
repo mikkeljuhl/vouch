@@ -18,7 +18,14 @@
 // A standalone, install-nothing binary (`bun build --compile`) is deferred — see
 // DESIGN.md §9 (Bun's test runner isn't an embeddable API).
 
+import { VERSION } from '../src/index'
+
 const argv = process.argv.slice(2)
+
+if (argv[0] === '--version' || argv[0] === '-v') {
+  console.log(VERSION)
+  process.exit(0)
+}
 
 if (argv[0] === '--help' || argv[0] === '-h') {
   console.log(
@@ -31,6 +38,7 @@ if (argv[0] === '--help' || argv[0] === '-h') {
       '                    (skips the run and exits non-zero if type-checking fails)',
       '  --typecheck-only  type-check only; exit with the type-checker status (no run)',
       '  --junit <file>    write a JUnit XML report to <file>',
+      '  -v, --version     print the vouch version',
       '  -h, --help        show this help',
       '',
       'Type-checking uses a baseline tsconfig shipped with vouch, so no tsconfig',
