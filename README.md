@@ -9,7 +9,8 @@ ours to control). There is no config file and no environment magic: the
 `createClient` factory call *is* the configuration, and it hits real HTTP
 endpoints over the native `fetch`.
 
-See [`DESIGN.md`](./DESIGN.md) for the full design and rationale.
+See [`docs/USAGE.md`](./docs/USAGE.md) for the usage guide, and
+[`DESIGN.md`](./DESIGN.md) for the design and rationale.
 
 ---
 
