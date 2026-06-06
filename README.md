@@ -2,10 +2,10 @@
 
 A reusable TypeScript framework for **code-authored, E2E-style API tests** against
 an **already-deployed** server. You create a **client** with a base URL and
-headers, then make fluent, awaitable requests and assert on responses. The core
-is **engine-agnostic** — it imports no test runner and assertions throw a plain
-`AssertionError`, so the same suite runs under **Bun** (the default runner),
-Vitest, or `node --test`. There is no config file and no environment magic: the
+headers, then make fluent, awaitable requests and assert on responses. **Bun is
+the required runtime.** The core imports no test runner — assertions throw a
+plain `AssertionError` (a clean-design choice that keeps the diffs and redaction
+ours to control). There is no config file and no environment magic: the
 `createClient` factory call *is* the configuration, and it hits real HTTP
 endpoints over the native `fetch`.
 
@@ -15,7 +15,9 @@ See [`DESIGN.md`](./DESIGN.md) for the full design and rationale.
 
 ## Requirements
 
-- **[Bun](https://bun.sh) 1.x** (default runner). Install:
+- **[Bun](https://bun.sh) ≥ 1.2 is required** — the framework targets Bun as its
+  only runtime and uses Bun-native APIs (`Bun.file`, fetch's `proxy` option, …).
+  Install:
 
   ```sh
   curl -fsSL https://bun.sh/install | bash
@@ -23,12 +25,11 @@ See [`DESIGN.md`](./DESIGN.md) for the full design and rationale.
 
   Bun runs TypeScript natively (no `tsconfig`/build to run a test), and provides
   the test runner (`bun:test`), `expect`, and `fetch` out of the box.
-- The package ships **TypeScript source** (no build step). Bun and Vitest both
-  consume TS directly.
-- **Engine-agnostic fallback.** Because the core imports no test library, the same
-  tests also run under **Vitest** or **`node --test`** — a near-free Node escape
-  hatch. The dogfood suite in this repo targets `bun:test`, but consumer suites
-  can import lifecycle helpers from whichever runner they prefer.
+- The package ships **TypeScript source** (no build step) — Bun consumes TS
+  directly.
+- The core imports **no test library**: assertions throw a plain `AssertionError`
+  (a clean-design property, so the diffs/redaction are fully ours), and the
+  dogfood suite uses `bun:test`.
 
 ---
 
@@ -144,8 +145,7 @@ let client: Client
 
 beforeAll(() => {
   client = createClient({
-    // Read your own env. Use API_BASE_URL — NOT BASE_URL, which Vite/Vitest
-    // reserves. `||` guards an empty-string env.
+    // Read your own env. `||` guards an empty-string env.
     baseUrl: process.env.API_BASE_URL || 'http://localhost:3000',
     headers: {
       // Auth is just a header callable, resolved per request (see API reference).
@@ -174,9 +174,8 @@ Run it:
 API_BASE_URL=https://your.api bun test
 ```
 
-> **Env var name — `API_BASE_URL`, not `BASE_URL`.** Vite/Vitest reserves
-> `BASE_URL`. Using `API_BASE_URL` keeps a suite running identically under Bun or
-> Vitest. Consumers may name their own vars anything.
+> **Env var name — `API_BASE_URL`, not `BASE_URL`.** `API_BASE_URL` is just a
+> plain, unsurprising convention; consumers may name their own vars anything.
 
 ---
 
@@ -208,6 +207,7 @@ interface ClientOptions {
   retry?: RetryOptions                   // default retry policy (opt-in)
   cookies?: boolean                      // opt-in in-memory session jar (default false)
   beforeRequest?: (req: OutgoingRequest) => void | Promise<void>  // per-attempt hook
+  proxy?: string                         // route fetch through a proxy (per-req: .proxy())
 }
 ```
 
@@ -239,6 +239,9 @@ interface ClientOptions {
   [Sessions & cookies](#sessions--cookies).
 - **`beforeRequest`** — a per-attempt hook to mutate the outgoing request (e.g.
   request signing). See [Request signing / hooks](#request-signing--hooks).
+- **`proxy`** — route every request through an HTTP/HTTPS/SOCKS proxy (forwarded
+  to Bun's `fetch` as its `proxy` option), overridable per request with
+  `.proxy(url)`. See [Proxy](#proxy).
 
 The returned `Client` exposes `get`/`post`/`put`/`patch`/`delete<T>(path)`, each
 returning a fluent `RequestBuilder<T>`. (It also exposes the lower-level
@@ -299,6 +302,31 @@ per attempt means a retry **re-signs** correctly. The body is readable for
 string/`Blob`/`URLSearchParams`/`FormData` bodies; a `ReadableStream` body is not
 re-readable and so cannot be signed from its content.
 
+### Proxy
+
+Route requests through an HTTP/HTTPS/SOCKS proxy. Set a client default with the
+`proxy` option, or override it per request with `.proxy(url)` — both are
+forwarded straight to Bun's `fetch` as its `proxy` option:
+
+```ts
+// Client default — every request goes through the proxy.
+const client = createClient({ baseUrl, proxy: 'http://proxy.local:8080' })
+
+// Per-request override (resolution: per-request .proxy() ?? client proxy).
+await client.get('/health').proxy('http://other-proxy:9090').expectStatus(200)
+```
+
+The proxy is **transport** — it is independent of `headers` / `beforeRequest`.
+
+> **Env-var proxying.** On Bun, the `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY`
+> env vars already route `fetch` automatically, so you often need nothing in
+> code. The `proxy` option is the **explicit/programmatic** form for choosing a
+> proxy from code:
+>
+> ```sh
+> HTTPS_PROXY=http://proxy.local:8080 bun test
+> ```
+
 ### The request builder
 
 Each builder method returns `this` and chains freely. The request is **not sent**
@@ -314,6 +342,7 @@ until you `await` the builder (or call `.send()`).
 | `.multipart(fields?)` | Start/extend a `multipart/form-data` body with string fields; fetch sets the boundary. |
 | `.file(name, blob, filename?)` | Append a file part to the multipart form (auto-creates it). |
 | `.timeout(ms)` | Override the per-request timeout. |
+| `.proxy(url)` | Route this request through a proxy (overrides the client default). See [Proxy](#proxy). |
 | `.retry({ times, when })` | Set the retry policy for this request (overrides the factory default). |
 | `.expectStatus(code)` | Assert the response status equals `code`. |
 | `.expectHeader(name, value)` | Assert a response header equals a string or matches a `RegExp`. |
