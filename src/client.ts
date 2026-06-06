@@ -124,6 +124,15 @@ export interface ClientOptions {
    * debug bodies and in assertion diffs (and thus in JUnit / annotations).
    */
   redact?: RedactOptions
+  /**
+   * Route every request through an HTTP/HTTPS/SOCKS proxy (forwarded to Bun's
+   * `fetch` as its `proxy` option). Overridable per request via `.proxy(url)`.
+   *
+   * This is the explicit/programmatic form: on Bun the `HTTP_PROXY` /
+   * `HTTPS_PROXY` / `NO_PROXY` env vars already route `fetch` automatically, so
+   * set this only when you need to choose a proxy in code.
+   */
+  proxy?: string
 }
 
 /** Options for a single low-level request. */
@@ -134,6 +143,12 @@ export interface RequestOptions {
   body?: RequestInit['body']
   /** Per-request timeout override (defaults to the client's `timeoutMs`). */
   timeoutMs?: number
+  /**
+   * Per-request proxy override (defaults to the client's `proxy`). Forwarded to
+   * Bun's `fetch` as its `proxy` option. Independent of `beforeRequest` (a proxy
+   * is transport, not headers).
+   */
+  proxy?: string
   signal?: AbortSignal
   /**
    * Invoked with the fully-resolved {@link OutgoingRequest} immediately before
@@ -166,6 +181,8 @@ export interface Client {
   readonly debug: 'onFailure' | 'always' | undefined
   /** Carried redaction options (header defaults + bodyKeys), or undefined. */
   readonly redact: RedactOptions | undefined
+  /** Carried default proxy URL (forwarded to fetch), or undefined if none. */
+  readonly proxy: string | undefined
   /** Begin a GET request to `path`; returns a fluent, awaitable builder. */
   get<T = unknown>(path: string): RequestBuilder<T>
   /** Begin a POST request to `path`; returns a fluent, awaitable builder. */
@@ -337,6 +354,7 @@ export function createClient(opts: ClientOptions): Client {
   const beforeRequest = opts.beforeRequest
   const debugMode = resolveDebugMode(opts.debug)
   const redact = opts.redact
+  const defaultProxy = opts.proxy
 
   // In-memory, per-client cookie jar (only used when `cookies: true`).
   const jar = new Map<string, string>()
@@ -358,6 +376,7 @@ export function createClient(opts: ClientOptions): Client {
     cookies: cookieJar,
     debug: debugMode,
     redact,
+    proxy: defaultProxy,
 
     get(path) {
       return createRequestBuilder(client, 'GET', path)
@@ -386,6 +405,11 @@ export function createClient(opts: ClientOptions): Client {
     async _request(method, path, requestOpts = {}) {
       const url = client.resolveUrl(path, requestOpts.query)
       const headers = await client.resolveHeaders(requestOpts.headers)
+
+      // Proxy is transport, resolved like other per-request options
+      // (per-request `.proxy()` ?? client default). It is independent of the
+      // `beforeRequest` hook. Forwarded to Bun's `fetch` as its `proxy` option.
+      const proxy = requestOpts.proxy ?? defaultProxy
 
       // Attach the cookie jar under the user's headers: a per-request
       // `.headers({ cookie })` (resolved above) overrides the jar entirely.
@@ -423,6 +447,7 @@ export function createClient(opts: ClientOptions): Client {
           headers: outgoing.headers,
           body: requestOpts.body ?? null,
           signal,
+          proxy,
         })
         if (cookiesEnabled) storeSetCookies(jar, res)
         return res
@@ -441,6 +466,7 @@ export function createClient(opts: ClientOptions): Client {
         headers,
         body: requestOpts.body ?? null,
         signal,
+        proxy,
       })
       if (cookiesEnabled) storeSetCookies(jar, res)
       return res

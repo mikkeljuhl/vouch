@@ -4,10 +4,10 @@ A reusable TypeScript framework for **code-authored**, E2E-style API testing
 against **already-deployed** servers. You create a **client** with a base URL and
 headers, then make fluent, awaitable requests and assert on responses.
 
-The framework has an **engine-agnostic core** (no dependency on any test runner)
-and runs by default under **Bun** — chosen so that getting started costs as
-little as possible. It is distributed as a **Docker image** and a **CLI** so even
-teams without a JavaScript toolchain can run tests with one command.
+The core has **no test-runner coupling** (it imports no test library — keeping
+diffs and redaction fully controllable), and **Bun is the required runtime**.
+It is distributed as a **Docker image** and a **CLI** so even teams without a
+JavaScript toolchain can run tests with one command.
 
 This repo holds both the framework and a dogfooding example suite that runs
 against an in-process `Bun.serve` mock so CI continuously self-tests the framework
@@ -32,10 +32,12 @@ everything: (1) a nice API, (2) minimal CI setup, (3) minimal local setup.
 - **Bun to kill setup friction.** Bun runs TS natively (no `tsconfig`/build to
   run), with a built-in test runner, `expect`, and `fetch`. Local is `bun test`;
   CI is `setup-bun` + `bun test`. This is the biggest lever for goals 2 & 3.
-- **Engine-agnostic core for safety.** The core never imports a test library;
-  assertions throw a plain error (which fails the test under *any* runner). Bun
-  is the default, but the framework still runs under Vitest or `node --test` —
-  a near-free hedge that preserves a Node escape hatch.
+  **Bun is the required runtime** — we commit to it and use Bun-native APIs
+  (`Bun.file`, fetch's `proxy` option, …).
+- **No test-runner coupling in the core.** The core never imports a test library;
+  assertions throw a plain error. This is a clean-design property — it keeps the
+  diffs and redaction fully ours to control — *not* a portability hedge: the
+  framework targets Bun only.
 - **Docker + CLI distribution.** Non-Node teams shouldn't install a JS toolchain:
   a Docker image (`oven/bun` base) and a CLI cover laptops and CI alike.
 
@@ -52,7 +54,7 @@ everything: (1) a nice API, (2) minimal CI setup, (3) minimal local setup.
 - Emit JUnit so any CI can report results.
 
 ### Non-goals (for now — see [§9 Deferred](#9-deferred))
-- A from-scratch test runner (we use the host runner — Bun by default).
+- A from-scratch test runner (we use Bun's built-in `bun:test` runner).
 - Booting/managing the target server (we hit a deployed URL).
 - Any config file, environments map, or `TEST_ENV` selection.
 - A dedicated auth concept (auth is just a header — see [§4](#4-the-client-factory)).
@@ -66,8 +68,8 @@ everything: (1) a nice API, (2) minimal CI setup, (3) minimal local setup.
 
 | Area | Decision |
 |---|---|
-| **Approach** | Custom fluent DSL with an **engine-agnostic** core (no test-lib dependency) |
-| **Default runner** | **Bun** (`bun test`); also runs under Vitest / `node --test` |
+| **Approach** | Custom fluent DSL with a core that has **no test-lib dependency** |
+| **Runner** | **Bun (required)** (`bun test`) |
 | **Language** | TypeScript (run natively by Bun; no build step to run) |
 | **Authoring** | Code — TS test files using a fluent chain builder |
 | **Target** | Already-running deployed env (base URL + headers) |
@@ -78,7 +80,7 @@ everything: (1) a nice API, (2) minimal CI setup, (3) minimal local setup.
 | **Headers** | `Record<string, string \| (() => string \| Promise<string>)>`; callables awaited **per request** |
 | **Auth** | No dedicated concept — auth is a header whose value is a callable |
 | **Assertions** | Status, headers, JSON body (deep & partial) — MVP |
-| **Assert impl** | **Built-in, engine-agnostic** — throws a clear `AssertionError` (expected/actual); a thrown error fails any runner. Fail-fast. |
+| **Assert impl** | **Built-in** (no test-lib dependency) — throws a clear `AssertionError` (expected/actual). Fail-fast. |
 | **Chaining** | First-class; state shared via `await`-resolved response objects (plain JS vars) |
 | **Concurrency** | Test files run in parallel; chains stay serial (plain `await`); runner-level retry for flake |
 | **Per-request retry** | Factory default + per-call override via predicate: `.retry({ times, when })`, opt-in |
@@ -103,6 +105,7 @@ interface ClientOptions {
   beforeRequest?: (req: OutgoingRequest) => void | Promise<void>  // per-attempt mutate hook
   debug?: boolean | 'onFailure' | 'always'  // failure diagnostics (default off)
   redact?: { headers?: string[]; bodyKeys?: string[] }  // secret redaction
+  proxy?: string                  // route fetch through a proxy (per-req: .proxy())
 }
 
 function createClient(opts: ClientOptions): Client
@@ -112,7 +115,19 @@ function createClient(opts: ClientOptions): Client
 - **Header callables** (sync or async) are resolved **per request** and awaited.
   This is the whole auth story: a token-bearing header is just a callable; the
   user caches inside the callable if they don't want per-request cost.
-- **Defaults** (`timeoutMs`, `retry`) are overridable per request.
+- **Defaults** (`timeoutMs`, `retry`, `proxy`) are overridable per request.
+
+### Proxy
+
+`proxy?: string` (client default) and a per-request `.proxy(url)` route requests
+through an HTTP/HTTPS/SOCKS proxy — forwarded straight to Bun's `fetch` as its
+`proxy` option (trivial now that the runtime is Bun-only). Resolution mirrors the
+other per-request options: **per-request `.proxy()` ?? client `proxy`**. It is
+**independent of `beforeRequest`** (a proxy is transport, not headers).
+
+> On Bun, the `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` env vars already route
+> `fetch` automatically — the `proxy` option is the **explicit/programmatic**
+> form for when you want to choose a proxy in code.
 
 ### Sessions & cookies (opt-in)
 
@@ -221,7 +236,7 @@ them). Pure, exported helpers `redactHeaders(headers, names)` and
 ### Authoring example
 
 ```ts
-import { describe, test, beforeAll } from 'bun:test'   // or 'vitest'
+import { describe, test, beforeAll } from 'bun:test'
 import { createClient, type Client } from '@mikkeljuhl/vouch'
 
 describe('users', () => {
@@ -255,9 +270,9 @@ describe('users', () => {
 })
 ```
 
-> **Env var name — `API_BASE_URL`, not `BASE_URL`.** Vite/Vitest reserves
-> `BASE_URL`. We keep `API_BASE_URL` as a convention so the example suite runs
-> identically under Bun or Vitest. Consumers may name their own vars anything.
+> **Env var name — `API_BASE_URL`, not `BASE_URL`.** We keep `API_BASE_URL` as a
+> convention (a plain, unsurprising name); consumers may name their own vars
+> anything.
 
 ### Client / builder surface
 
@@ -271,6 +286,7 @@ client.get<T>(path) / .post / .put / .patch / .delete
   .multipart(fields?)         // start/extend a multipart FormData (string fields)
   .file(name, blob, filename?)// append a file part to the multipart FormData
   .timeout(ms)
+  .proxy(url)                 // route this request through a proxy (overrides client default)
   .retry({ times, when })
   .debug()                    // force a failure-diagnostics dump for this request
   .expectStatus(code)
@@ -331,9 +347,8 @@ request times out at 30s instead of hanging forever. The effective timeout is
 `per-request ?? factory ?? DEFAULT_TIMEOUT_MS`. **`timeoutMs: 0` is the escape
 hatch** — it disables the timeout (no `AbortSignal` is attached).
 
-The lifecycle (`test`/`describe`/`beforeAll`) comes from the **host runner**
-(`bun:test` by default, or `vitest`). The framework provides only `createClient`,
-the builder, and the assertions.
+The lifecycle (`test`/`describe`/`beforeAll`) comes from **`bun:test`**. The
+framework provides only `createClient`, the builder, and the assertions.
 
 ### File uploads & fixtures
 
@@ -357,9 +372,9 @@ break its boundary. At request time the auto value is merged *under* user header
 (user `.headers()` wins). Body setters are last-writer-wins: `.json()` after
 `.multipart()` overwrites the form (and clears the shared `FormData`).
 
-**Fixtures.** `fixture(import.meta.url, './fixtures/sample.zip', type?)` reads a
-file relative to the calling test and returns a `Blob`, using runtime builtins
-(`node:fs`/`node:url`) so it works under Bun and Node alike. Resolving relative to
+**Fixtures.** `fixture(import.meta.url, './fixtures/sample.zip', type?)` returns a
+`Bun.file(new URL(...))` — a `BunFile`, which *is* a `Blob` (works in `FormData`,
+exposes `.size`/`.type`). Resolving relative to
 `import.meta.url` (not cwd) makes fixtures resolve identically locally and inside
 the Docker image — **keep fixtures under `tests/`** so they travel into the image
 (the `tests/` dir is copied/mounted; `.dockerignore` must not exclude
@@ -372,12 +387,14 @@ stream body, the builder throws early with a clear message; use a `Blob`/`Buffer
 
 ---
 
-## 5. Engine-agnostic assertions
+## 5. Assertions (no test-lib dependency)
 
 The core imports **no** test library. Each `expect*` method evaluates against the
 settled response and, on mismatch, throws an `AssertionError` with a clear
-message (method, URL, expected, actual). Because every runner treats a thrown
-error as a failing test, the same suite runs under Bun, Vitest, or `node --test`.
+message (method, URL, expected, actual). Bun's runner treats a thrown error as a
+failing test. Avoiding a runner's `expect` keeps the diffs and redaction fully
+ours to control — it is a clean-design choice, not a portability hedge (the
+framework targets Bun only).
 
 - **Fail-fast:** the first failing expectation throws; later ones don't run.
 - **Structured path-level diffs.** `.expectJson` (subset) and `.expectJsonStrict`
@@ -389,7 +406,7 @@ error as a failing test, the same suite runs under Bun, Vitest, or `node --test`
   sane length, and the list is capped (first 20, then `… and N more`). The walker
   is the single source of truth for the message but agrees exactly with the
   existing `isSubset`/`deepEqual` booleans, so **pass/fail behavior is unchanged**
-  — only the message improved. This stays dependency-free (no runner `expect`).
+  — only the message improved. This stays free of any runner `expect`.
 
 ---
 
@@ -404,7 +421,7 @@ RequestBuilder ──builds──▶ fetch ──response──▶ built-in asse
       │ created by user in beforeAll
    createClient(opts)
 
-host runner (bun test | vitest) ──▶ JUnit reporter ─┐
+bun test ─────────────────────▶ JUnit reporter ─┐
                                   └▶ console log ────┴▶ job-summary script ──▶ CI
                                      (messages merged into JUnit; see §8)
 ```
@@ -417,7 +434,7 @@ host runner (bun test | vitest) ──▶ JUnit reporter ─┐
 src/
   client.ts        # createClient(opts) → fetch wrapper: base url, header resolution, defaults
   builder.ts       # fluent RequestBuilder: methods, query, headers, retry, timeout, expect*
-  assert.ts        # engine-agnostic AssertionError + matchers (status/header/json)
+  assert.ts        # built-in AssertionError + matchers (status/header/json); no test-lib dep
   index.ts         # public exports (createClient, types)
 cli/
   vouch.ts         # CLI entry: discover + run *.test.ts (Bun)
@@ -429,11 +446,10 @@ tsconfig.json      # typecheck only (`tsc --noEmit`); no emit/build
 ```
 
 The library ships **TypeScript source** and is consumed **as TypeScript** (Bun
-and Vitest both run TS directly), so **no build step** exists — the package
-`exports` map points `.` at `./src/index.ts`. There is intentionally **no**
-`tsup.config.ts` (no bundle) and **no** `vitest.config.ts` (Bun is the default
-runner; Vitest is only a documented fallback). A bundled build is only needed if
-we ever publish for non-TS-aware consumers (deferred, §10).
+runs TS directly), so **no build step** exists — the package `exports` map points
+`.` at `./src/index.ts`. There is intentionally **no** `tsup.config.ts` (no
+bundle): **Bun is the required runtime** and runs the source as-is. A bundled
+build is only needed if we ever publish for non-TS-aware consumers (deferred, §10).
 
 ---
 
@@ -482,8 +498,9 @@ we ever publish for non-TS-aware consumers (deferred, §10).
 - **Fail-fast + per-request retry coexist cleanly.** Retry handles transient
   transport/5xx *before* assertions evaluate; fail-fast governs evaluation after
   the response settles. Retry is **opt-in** so a real 4xx is never masked.
-- **Engine-agnostic core, Bun default.** Bun minimizes setup; the dependency-free
-  assertion layer preserves a Node/Vitest fallback at near-zero cost.
+- **Bun-only, no test-lib coupling.** Bun minimizes setup and is the required
+  runtime; the core still imports no test library — a clean-design property that
+  keeps the diffs/redaction ours to control (not a portability hedge).
 - **One language is a deliberate adoption bet.** We minimize friction via setup
   (Bun/Docker/CLI) and scaffolding rather than N native SDKs.
 - **Standalone-binary risk.** A Docker image is a reliable zero-install artifact.

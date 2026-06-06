@@ -105,6 +105,11 @@ export interface RequestBuilder<T = unknown> extends PromiseLike<ApiResponse<T>>
   file(name: string, file: Blob, filename?: string): this
   /** Override the per-request timeout (ms). */
   timeout(ms: number): this
+  /**
+   * Route THIS request through the given proxy URL (HTTP/HTTPS/SOCKS), forwarded
+   * to Bun's `fetch`. Overrides the client's default `proxy` for this request.
+   */
+  proxy(url: string): this
   /** Store a retry policy for this request (execution wired in Phase 3). */
   retry(options: RetryOptions): this
   /**
@@ -355,6 +360,8 @@ export function createRequestBuilder<T>(
   // `.file()`) accumulate into the SAME instance.
   let form: FormData | undefined
   let timeoutMs: number | undefined
+  // Per-request proxy override (forwarded to fetch); falls back to client.proxy.
+  let proxy: string | undefined
   // Stored for Phase 3; intentionally unused in execution for now.
   let retryOptions: RetryOptions | undefined
   // Per-request `.debug()` forces an 'always' dump regardless of client.debug.
@@ -427,6 +434,11 @@ export function createRequestBuilder<T>(
 
     timeout(ms) {
       timeoutMs = ms
+      return this
+    },
+
+    proxy(url) {
+      proxy = url
       return this
     },
 
@@ -579,6 +591,9 @@ export function createRequestBuilder<T>(
           headers: mergedHeaders,
           body,
           timeoutMs,
+          // Per-request `.proxy()` ?? client default. Omitting it lets `_request`
+          // fall back to the client's `proxy`; passing `undefined` is also fine.
+          proxy,
           onSend,
         })
         lastResponse = res

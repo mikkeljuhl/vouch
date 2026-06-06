@@ -1,13 +1,14 @@
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
-
 /**
  * The package version — read from package.json at import time so it is the single
  * source of truth (never drifts from the manifest). Resolved relative to this
  * module, so it works whether running from source (Bun) or as an installed dep.
+ *
+ * Uses a top-level `await` over `Bun.file(...).json()` (Bun-native; the framework
+ * targets Bun as its only runtime). Top-level await is valid in Bun ESM and under
+ * tsc with `module: ESNext`.
  */
-export const VERSION: string = JSON.parse(
-  readFileSync(fileURLToPath(new URL('../package.json', import.meta.url)), 'utf8'),
+export const VERSION: string = (
+  await Bun.file(new URL('../package.json', import.meta.url)).json()
 ).version
 
 export { createClient, DEFAULT_TIMEOUT_MS, resolveDebugMode } from './client'
