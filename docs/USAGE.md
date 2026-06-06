@@ -138,13 +138,17 @@ Debug and redaction. `debug: 'onFailure'` dumps request and response to stderr o
 
 ## Running
 
-Local:
+Local is the dev loop, whatever your service is written in (Bun is one binary;
+`localhost` works directly):
 
 ```sh
-API_BASE_URL=https://your.api bun test
+curl -fsSL https://bun.sh/install | bash   # one binary
+bunx @mikkeljuhl/vouch init                # scaffold tests/, an example, tsconfig
+export API_BASE_URL=http://localhost:8080  # your running service
+bun test --watch
 ```
 
-The `vouch` CLI wraps `bun test` with two conveniences:
+`vouch` wraps `bun test`:
 
 ```sh
 vouch tests/users.test.ts          # run specific files
@@ -152,10 +156,14 @@ vouch --junit reports/junit.xml    # expands to Bun's JUnit reporter flags
 vouch --typecheck                  # tsc --noEmit (baseline config), then run
 ```
 
-Docker (Bun + the framework preinstalled; mount your tests over `/app/tests`):
+Docker covers CI and zero-install one-offs (mount your tests over `/app/tests`).
+A container can't reach the host's `localhost`, so use `host.docker.internal`:
 
 ```sh
-docker run --rm -v "$PWD/tests:/app/tests" ghcr.io/mikkeljuhl/vouch:0.3.0 --reporter=junit --reporter-outfile=/app/reports/junit.xml
+docker run --rm -v "$PWD/tests:/app/tests" \
+  --add-host=host.docker.internal:host-gateway \
+  -e API_BASE_URL=http://host.docker.internal:8080 \
+  ghcr.io/mikkeljuhl/vouch:0.3.0
 ```
 
 CI. The action runs the runner image (same `Dockerfile` as `docker run`), runs the tests, then emits annotations and a summary. Linux runners only; type-checking is a separate native step.
