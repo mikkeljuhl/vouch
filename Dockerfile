@@ -36,6 +36,10 @@ RUN mkdir -p node_modules/@mikkeljuhl && ln -sf /app node_modules/@mikkeljuhl/vo
 # Bake the dogfood suite + reporting script so `docker run` self-tests by default.
 COPY tests ./tests
 COPY scripts ./scripts
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
 
-# `bun test` is the entrypoint; extra args (e.g. --reporter=junit) pass through.
-ENTRYPOINT ["bun", "test"]
+# In a GitHub Action (GITHUB_WORKSPACE set) the entrypoint runs the consumer's
+# workspace tests with JUnit + annotations + summary; otherwise it execs
+# `bun test "$@"` for plain `docker run` (extra args pass through).
+ENTRYPOINT ["/app/docker-entrypoint.sh"]

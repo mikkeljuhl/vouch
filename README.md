@@ -79,8 +79,10 @@ Or build it yourself from the `Dockerfile` (`docker build -t vouch .`); `docker 
 
 ### 3. CI (GitHub Actions)
 
-**Easiest — the packaged composite action.** It does setup-bun → install →
-(optional) typecheck → `bun test` (JUnit) → inline annotations + job summary:
+The action runs the same runner image (built from the `Dockerfile`), so the
+action and `docker run` are one path. It runs your tests, emits JUnit, and posts
+inline annotations + a job summary. Your test files import the framework by name;
+the entrypoint resolves it in the workspace. Linux runners only.
 
 ```yaml
 jobs:
@@ -92,17 +94,21 @@ jobs:
       - uses: actions/checkout@v5
       - uses: mikkeljuhl/vouch@v0.2.0    # pin a release tag (or @main for latest)
         with:
-          typecheck: 'true'              # optional; runs tsc --noEmit first
-          # paths: tests                 # optional; default = all discovered tests
-          # bun-version: latest
-          # working-directory: .
-          # junit-file: reports/junit.xml
+          paths: tests                   # optional; default = all discovered tests
+          junit-file: reports/junit.xml  # optional
+```
+
+Type-checking is a separate native step (Bun transpiles but never type-checks):
+
+```yaml
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile && bun run typecheck
 ```
 
 **Or wire the steps yourself** — use `oven-sh/setup-bun`, run `bun test` with the
 JUnit reporter, then feed the XML to the summary script. This mirrors
-[`.github/workflows/ci.yml`](./.github/workflows/ci.yml) (which itself dogfoods
-the action via `uses: ./`):
+[`.github/workflows/ci.yml`](./.github/workflows/ci.yml) (which dogfoods the
+action via `uses: ./`):
 
 ```yaml
 jobs:
