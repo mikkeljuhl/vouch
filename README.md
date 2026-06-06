@@ -34,27 +34,29 @@ See [`docs/USAGE.md`](./docs/USAGE.md) for the usage guide, and
 
 ---
 
-## Three ways to run
+## Running
 
-### 1. Local (Bun on PATH)
+### Local (Bun) — the dev loop
+
+This is the path for writing and iterating on tests, whatever your service is
+written in (Java, Go, anything — vouch sends real HTTP). Bun is a single binary,
+and a local service on `localhost` needs no special setup.
 
 ```sh
-bun test                                   # discover + run *.test.ts
-bun test tests/users.test.ts               # a single file
+curl -fsSL https://bun.sh/install | bash   # one binary
+bunx @mikkeljuhl/vouch init                # scaffold tests/, an example, tsconfig
+export API_BASE_URL=http://localhost:8080  # point at your running service
+bun test --watch                           # edit-run loop, with editor IntelliSense
+```
 
-# Or via the bundled CLI (a thin wrapper over `bun test`):
-vouch                                       # = bun test
-vouch tests/users.test.ts
+`bun test` discovers `*.test.ts`; `vouch` is a thin wrapper over it:
+
+```sh
+bun test tests/users.test.ts               # a single file
 vouch --junit reports/junit.xml            # expands to Bun's JUnit reporter flags
 ```
 
-Set the base URL with an env var your suite reads (see [Quickstart](#quickstart)):
-
-```sh
-API_BASE_URL=https://your.api bun test
-```
-
-### 2. Docker (no JS toolchain)
+### Docker — CI and zero-install one-offs
 
 A runner image (`oven/bun` base) with the framework preinstalled, so teams
 without a JavaScript toolchain run tests with one command. Your test files import
@@ -77,7 +79,20 @@ docker run --rm \
 
 Or build it yourself from the `Dockerfile` (`docker build -t vouch .`); `docker run --rm vouch` self-tests the baked dogfood suite.
 
-### 3. CI (GitHub Actions)
+To hit a service running on the host, a container can't reach the host's
+`localhost`. Use `host.docker.internal`:
+
+```sh
+docker run --rm -v "$PWD/tests:/app/tests" \
+  --add-host=host.docker.internal:host-gateway \
+  -e API_BASE_URL=http://host.docker.internal:8080 \
+  ghcr.io/mikkeljuhl/vouch:0.3.0
+```
+
+For the day-to-day local loop, prefer Bun (above) — `localhost` works directly
+and you get `--watch` + editor IntelliSense.
+
+### CI (GitHub Actions)
 
 The action runs the same runner image (built from the `Dockerfile`), so the
 action and `docker run` are one path. It runs your tests, emits JUnit, and posts
@@ -683,8 +698,8 @@ dependency-free [`scripts/ci-summary.mjs`](./scripts/ci-summary.mjs), which:
 
 The console-log argument is optional: omit it and the script falls back to the
 JUnit-only behaviour (failures shown by error type). Wire it in CI as shown in
-[Three ways to run → CI](#3-ci-github-actions). The script is repo-local and not
-shipped in the package.
+[Running → CI](#ci-github-actions). The script is repo-local and not shipped in
+the package.
 
 ---
 

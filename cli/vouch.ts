@@ -20,11 +20,35 @@
 
 import { VERSION } from '../src/index'
 
+// Scaffold written by `vouch init`. Declared before the init dispatch so it is
+// initialized when runInit runs (top-level const, no TDZ).
+const EXAMPLE_TEST = `import { beforeAll, describe, test } from 'bun:test'
+import { createClient, type Client } from '@mikkeljuhl/vouch'
+
+// Point this at your running service — any backend works, vouch sends real HTTP.
+const baseUrl = process.env.API_BASE_URL ?? 'http://localhost:8080'
+
+describe('my api', () => {
+  let client: Client
+  beforeAll(() => {
+    client = createClient({ baseUrl })
+  })
+
+  test('health check', async () => {
+    await client.get('/health').expectStatus(200)
+  })
+})
+`
+
 const argv = process.argv.slice(2)
 
 if (argv[0] === '--version' || argv[0] === '-v') {
   console.log(VERSION)
   process.exit(0)
+}
+
+if (argv[0] === 'init') {
+  process.exit(await runInit(argv.slice(1)))
 }
 
 if (argv[0] === '--help' || argv[0] === '-h') {
@@ -40,6 +64,10 @@ if (argv[0] === '--help' || argv[0] === '-h') {
       '  --junit <file>    write a JUnit XML report to <file>',
       '  -v, --version     print the vouch version',
       '  -h, --help        show this help',
+      '',
+      'Subcommands:',
+      '  init [dir]        scaffold tests/, an example, and tsconfig.json',
+      '                    (--no-install skips `bun add`)',
       '',
       'Type-checking uses a baseline tsconfig shipped with vouch, so no tsconfig',
       'authoring is needed. Paths default to **/*.test.ts and **/*.spec.ts',
@@ -149,3 +177,73 @@ const proc = Bun.spawn(['bun', 'test', ...passthrough], {
   stdin: 'inherit',
 })
 process.exit(await proc.exited)
+
+/**
+ * `vouch init [dir]` — scaffold a tests/ dir, an example test, and a tsconfig so
+ * the editor lights up, then (unless --no-install) `bun add` the framework.
+ * Existing files are never overwritten.
+ */
+async function runInit(args: string[]): Promise<number> {
+  const noInstall = args.includes('--no-install')
+  const dir = (args.find((a) => !a.startsWith('-')) ?? '.').replace(/\/+$/, '')
+  const at = (rel: string) => `${dir}/${rel}`
+
+  const writeIfAbsent = async (rel: string, content: string): Promise<void> => {
+    if (await Bun.file(at(rel)).exists()) {
+      console.log(`  skip   ${rel} (exists)`)
+      return
+    }
+    await Bun.write(at(rel), content)
+    console.log(`  create ${rel}`)
+  }
+
+  await writeIfAbsent(
+    'package.json',
+    JSON.stringify({ name: 'api-tests', private: true, type: 'module' }, null, 2) + '\n',
+  )
+  await writeIfAbsent(
+    'tsconfig.json',
+    JSON.stringify(
+      {
+        compilerOptions: {
+          strict: true,
+          module: 'ESNext',
+          moduleResolution: 'bundler',
+          target: 'ES2023',
+          types: ['bun'],
+          skipLibCheck: true,
+          noEmit: true,
+        },
+        include: ['tests'],
+      },
+      null,
+      2,
+    ) + '\n',
+  )
+  await writeIfAbsent('tests/example.test.ts', EXAMPLE_TEST)
+
+  if (!noInstall) {
+    console.log('\nInstalling @mikkeljuhl/vouch …')
+    const add = Bun.spawn(['bun', 'add', '-d', '@mikkeljuhl/vouch'], {
+      cwd: dir,
+      stdout: 'inherit',
+      stderr: 'inherit',
+    })
+    if ((await add.exited) !== 0) {
+      console.log('  (install failed — run it yourself: bun add -d @mikkeljuhl/vouch)')
+    }
+  }
+
+  console.log(
+    [
+      '',
+      'Done. Next:',
+      noInstall ? '  bun add -d @mikkeljuhl/vouch' : '',
+      '  export API_BASE_URL=http://localhost:8080   # point at your service',
+      '  bun test --watch',
+    ]
+      .filter((line) => line !== '')
+      .join('\n'),
+  )
+  return 0
+}

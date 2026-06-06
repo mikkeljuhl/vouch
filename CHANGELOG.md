@@ -10,7 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added
+- `vouch init [dir]` scaffolds `tests/`, an example test, and a `tsconfig.json` (`--no-install` skips `bun add`).
+
+### Changed
+- Docs lead with the Bun local loop (`bunx @mikkeljuhl/vouch init` + `bun test --watch`) as the dev path for any backend; Docker is positioned for CI and zero-install one-offs (with a `host.docker.internal` note for hitting a local service).
 
 ## [0.3.0] - 2026-06-06
 
