@@ -1,67 +1,26 @@
 name: 'vouch — run API tests'
-description: 'Run vouch API tests with Bun, emit JUnit, and post inline annotations + a job summary.'
+description: 'Run vouch API tests in the runner image (Bun + the framework), with JUnit, inline annotations, and a job summary.'
 branding:
   icon: 'check-circle'
   color: 'green'
 
+# Docker container action: builds the same Dockerfile that produces the published
+# runner image, so the action and `docker run` are one path. Linux runners only.
+# Test files import the framework by name (`@mikkeljuhl/vouch`); the entrypoint
+# symlinks it into the workspace so the import resolves.
 inputs:
   paths:
     description: 'Test paths/globs to run (default: all discovered tests).'
     required: false
     default: ''
-  bun-version:
-    description: 'Bun version passed to oven-sh/setup-bun.'
-    required: false
-    default: 'latest'
-  working-directory:
-    description: 'Directory to install and run in.'
-    required: false
-    default: '.'
-  typecheck:
-    description: 'Run `tsc --noEmit` before the tests (set "true" to enable).'
-    required: false
-    default: 'false'
   junit-file:
-    description: 'JUnit output path, relative to working-directory.'
+    description: 'JUnit output path, relative to the workspace.'
     required: false
     default: 'reports/junit.xml'
 
 runs:
-  using: 'composite'
-  steps:
-    - uses: oven-sh/setup-bun@v2
-      with:
-        bun-version: ${{ inputs.bun-version }}
-
-    - name: Install
-      shell: bash
-      working-directory: ${{ inputs.working-directory }}
-      run: bun install --frozen-lockfile
-
-    - name: Typecheck
-      if: ${{ inputs.typecheck == 'true' }}
-      shell: bash
-      working-directory: ${{ inputs.working-directory }}
-      run: bunx tsc --noEmit
-
-    - name: Test
-      shell: bash
-      working-directory: ${{ inputs.working-directory }}
-      # Tee Bun's console output to an action-local file: Bun's JUnit <failure>
-      # carries only the error `type` (no message), but the console output has
-      # the full assertion message (our structured diff). The summary step merges
-      # it into the JUnit. `shell: bash` runs with `set -o pipefail` by default,
-      # so a failing `bun test` still fails this step through the pipe (tee's
-      # success doesn't mask the test failure).
-      run: bun test ${{ inputs.paths }} --reporter=junit --reporter-outfile=${{ inputs.junit-file }} 2>&1 | tee vouch-console.log
-
-    # Parse the JUnit XML into inline annotations + a Markdown job summary, and
-    # merge the captured console messages into the JUnit <failure> elements (so
-    # the JUnit artifact itself carries the message). Runs even when tests fail
-    # (the report is written regardless); the job still fails because the Test
-    # step failed. The script ships with this action.
-    - name: Job summary + annotations
-      if: always()
-      shell: bash
-      working-directory: ${{ inputs.working-directory }}
-      run: bun "${{ github.action_path }}/scripts/ci-summary.mjs" "${{ inputs.junit-file }}" vouch-console.log
+  using: 'docker'
+  image: 'Dockerfile'
+  env:
+    INPUT_PATHS: ${{ inputs.paths }}
+    INPUT_JUNIT_FILE: ${{ inputs.junit-file }}

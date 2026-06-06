@@ -1,7 +1,8 @@
 name: CI
 
-# Repo-local CI that DOGFOODS the packaged composite action (`uses: ./`) to run
-# the framework's own suite — so green CI also verifies the action consumers use.
+# Dogfoods the Docker action (`uses: ./`, built from the Dockerfile) to run the
+# suite, so green CI verifies the same action + image consumers use. Typecheck
+# runs natively (Bun transpiles + type-strips but never type-checks).
 on:
   pull_request:
 
@@ -10,13 +11,21 @@ permissions:
 
 jobs:
   test:
-    name: Test (Bun)
+    name: Test (image)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-
-      # The composite action (action.yml) does: setup-bun → install → typecheck
-      # → bun test (JUnit) → inline annotations + job summary.
+      # Builds the Dockerfile and runs the suite via the entrypoint
+      # (JUnit -> annotations + job summary).
       - uses: ./
+
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
         with:
-          typecheck: 'true'
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck

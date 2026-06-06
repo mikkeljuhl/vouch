@@ -158,14 +158,13 @@ Docker (Bun + the framework preinstalled; mount your tests over `/app/tests`):
 docker run --rm -v "$PWD/tests:/app/tests" ghcr.io/mikkeljuhl/vouch:0.2.0 --reporter=junit --reporter-outfile=/app/reports/junit.xml
 ```
 
-CI. The composite action runs setup-bun, install, optional typecheck, the tests, then annotations and a summary:
+CI. The action runs the runner image (same `Dockerfile` as `docker run`), runs the tests, then emits annotations and a summary. Linux runners only; type-checking is a separate native step.
 
 ```yaml
 - uses: actions/checkout@v5
 - uses: mikkeljuhl/vouch@v0.2.0
   with:
-    typecheck: 'true'
-    junit-file: reports/junit.xml
+    junit-file: reports/junit.xml   # optional; paths: defaults to all tests
 ```
 
 ## Reporting
