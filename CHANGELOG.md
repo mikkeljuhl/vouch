@@ -12,6 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _Nothing yet._
 
+## [0.3.0] - 2026-06-06
+
+### Added
+- MIT license; the package is published to npm as `@mikkeljuhl/vouch` (public).
+
+### Changed
+- The GitHub Action is now a Docker container action (`image: Dockerfile`) running the same runner image as `docker run` — one path. Inputs trimmed to `paths` + `junit-file`; Linux runners only; type-checking moves to a separate native step.
+
 ## [0.2.0] - 2026-06-06
 
 ### Added
@@ -39,7 +47,8 @@ fluent builder, distributed as a library, Docker image, CLI, and GitHub Action.
 - **Runtimes & distribution** — runs under Bun (default), Vitest, or `node --test`; ships TypeScript source plus generated `.d.ts`. Docker runner image, `vouch` CLI (`--junit`, `--typecheck`/`--typecheck-only`, `--version`), and a composite GitHub Action.
 - **Reporting** — JUnit via Bun, enriched with failure messages (Bun's JUnit omits them) by `scripts/ci-summary.mjs`, which also emits inline annotations + a job-summary table.
 
-[Unreleased]: https://github.com/mikkeljuhl/vouch/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/mikkeljuhl/vouch/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/mikkeljuhl/vouch/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/mikkeljuhl/vouch/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/mikkeljuhl/vouch/releases/tag/v0.1.0
 

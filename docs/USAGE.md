@@ -155,14 +155,14 @@ vouch --typecheck                  # tsc --noEmit (baseline config), then run
 Docker (Bun + the framework preinstalled; mount your tests over `/app/tests`):
 
 ```sh
-docker run --rm -v "$PWD/tests:/app/tests" ghcr.io/mikkeljuhl/vouch:0.2.0 --reporter=junit --reporter-outfile=/app/reports/junit.xml
+docker run --rm -v "$PWD/tests:/app/tests" ghcr.io/mikkeljuhl/vouch:0.3.0 --reporter=junit --reporter-outfile=/app/reports/junit.xml
 ```
 
 CI. The action runs the runner image (same `Dockerfile` as `docker run`), runs the tests, then emits annotations and a summary. Linux runners only; type-checking is a separate native step.
 
 ```yaml
 - uses: actions/checkout@v5
-- uses: mikkeljuhl/vouch@v0.2.0
+- uses: mikkeljuhl/vouch@v0.3.0
   with:
     junit-file: reports/junit.xml   # optional; paths: defaults to all tests
 ```

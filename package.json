@@ -1,7 +1,23 @@
 {
   "name": "@mikkeljuhl/vouch",
-  "version": "0.2.0",
-  "private": true,
+  "version": "0.3.0",
+  "license": "MIT",
+  "description": "Code-authored API test framework for Bun: a fluent builder that sends real requests and asserts on responses.",
+  "author": "Mikkel Juhl",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mikkeljuhl/vouch.git"
+  },
+  "homepage": "https://github.com/mikkeljuhl/vouch#readme",
+  "bugs": "https://github.com/mikkeljuhl/vouch/issues",
+  "keywords": [
+    "api",
+    "testing",
+    "e2e",
+    "bun",
+    "http",
+    "fetch"
+  ],
   "type": "module",
   "engines": {
     "bun": ">=1.2.0"
