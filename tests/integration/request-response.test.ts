@@ -1,7 +1,7 @@
 /**
  * Integration suite for the vouch framework's request shaping + response
  * handling, driven end-to-end against the in-process Bun mock (real HTTP, no
- * external network). Each test file gets its own mock instance (fresh state).
+ * external network). Setup via useMockServer(); failure paths via captureAssertion.
  *
  * Coverage:
  *  - query encoding (spaces / special chars / multiple params / falsy values)
@@ -10,21 +10,15 @@
  *  - request bodies: .json(), .form() (urlencoded), .multipart().file()
  *    (real fixture upload, framework-set boundary), .body() raw + explicit CT
  *  - response types: /text, /html, /empty, /malformed-json fallback, JSON
+ *  - assertion failure paths → AssertionError with request-identifying messages
  */
 
-import { describe, test, expect, beforeAll, afterAll } from 'bun:test'
-import { createClient, fixture, AssertionError } from '../../src/index'
-import { startMockServer } from '../support/mock-server'
+import { describe, test, expect } from 'bun:test'
+import { fixture } from '../../src/index'
+import { useMockServer } from '../support/mock-client'
+import { captureAssertion } from '../support/assert'
 
-let server: { url: string; stop(): void }
-
-beforeAll(() => {
-  server = startMockServer()
-})
-
-afterAll(() => {
-  server.stop()
-})
+const mock = useMockServer()
 
 /** The /echo route reflects the request shape; this is its (typed) body. */
 interface EchoResponse {
@@ -37,9 +31,8 @@ interface EchoResponse {
 
 describe('request shaping → /echo', () => {
   test('query params: spaces, special chars, falsy values, multiple params', async () => {
-    const client = createClient({ baseUrl: server.url })
-
-    const res = await client
+    const res = await mock
+      .client()
       .get<EchoResponse>('/echo')
       .query({ a: 1, b: 'x y', c: true, d: 0, e: 'a/b&c' })
       .expectStatus(200)
@@ -69,8 +62,7 @@ describe('request shaping → /echo', () => {
 
   test('headers: factory + per-request override, callable, case-insensitive, expectHeader', async () => {
     let callCount = 0
-    const client = createClient({
-      baseUrl: server.url,
+    const client = mock.client({
       headers: {
         'X-Factory': 'factory-value',
         'X-Overridden': 'from-factory',
@@ -104,13 +96,9 @@ describe('request shaping → /echo', () => {
   })
 
   test('json body: object reflected verbatim (nested)', async () => {
-    const client = createClient({ baseUrl: server.url })
     const payload = { name: 'Ada', tags: ['x', 'y'], meta: { active: true, score: 42 } }
 
-    const res = await client
-      .post<EchoResponse>('/echo')
-      .json(payload)
-      .expectStatus(200)
+    const res = await mock.client().post<EchoResponse>('/echo').json(payload).expectStatus(200)
 
     // The framework set application/json, so the mock parsed the body as JSON.
     expect(res.body.headers['content-type']).toContain('application/json')
@@ -118,9 +106,8 @@ describe('request shaping → /echo', () => {
   })
 
   test('form body: urlencoded fields, content-type auto-set by fetch', async () => {
-    const client = createClient({ baseUrl: server.url })
-
-    const res = await client
+    const res = await mock
+      .client()
       .post<EchoResponse>('/echo')
       .form({ k: 'v', other: 'a b', sym: 'x&y' })
       .expectStatus(200)
@@ -131,10 +118,10 @@ describe('request shaping → /echo', () => {
   })
 
   test('multipart + file: real fixture upload, framework-set boundary content-type', async () => {
-    const client = createClient({ baseUrl: server.url })
     const zip = fixture(import.meta.url, '../fixtures/sample.zip', 'application/zip')
 
-    const res = await client
+    const res = await mock
+      .client()
       .post<EchoResponse>('/echo')
       .multipart({ field: 'v' })
       .file('f', zip, 'sample.zip')
@@ -160,10 +147,10 @@ describe('request shaping → /echo', () => {
   })
 
   test('raw body with explicit content-type via .body() + .headers()', async () => {
-    const client = createClient({ baseUrl: server.url })
     const raw = 'just a raw string payload'
 
-    const res = await client
+    const res = await mock
+      .client()
       .post<EchoResponse>('/echo')
       .body(raw)
       .headers({ 'content-type': 'text/plain' })
@@ -177,9 +164,8 @@ describe('request shaping → /echo', () => {
 
 describe('response body + type permutations', () => {
   test('/text → expectText substring + regex', async () => {
-    const client = createClient({ baseUrl: server.url })
-
-    const res = await client
+    const res = await mock
+      .client()
       .get('/text')
       .expectStatus(200)
       .expectHeader('content-type', /text\/plain/)
@@ -192,9 +178,8 @@ describe('response body + type permutations', () => {
   })
 
   test('/html → expectText(/<h1>/)', async () => {
-    const client = createClient({ baseUrl: server.url })
-
-    const res = await client
+    const res = await mock
+      .client()
       .get('/html')
       .expectStatus(200)
       .expectHeader('content-type', /text\/html/)
@@ -204,20 +189,17 @@ describe('response body + type permutations', () => {
   })
 
   test('/empty → expectBody("") on a 204', async () => {
-    const client = createClient({ baseUrl: server.url })
-
-    const res = await client.get('/empty').expectStatus(204).expectBody('')
+    const res = await mock.client().get('/empty').expectStatus(204).expectBody('')
 
     expect(res.text).toBe('')
     expect(res.status).toBe(204)
   })
 
   test('/malformed-json → body falls back to text (no throw), text is raw', async () => {
-    const client = createClient({ baseUrl: server.url })
-
     // The route sends application/json but an invalid body; parsing must NOT
     // throw — body falls back to the raw string and .text is that raw string.
-    const res = await client
+    const res = await mock
+      .client()
       .get('/malformed-json')
       .expectStatus(200)
       .expectHeader('content-type', /application\/json/)
@@ -228,10 +210,9 @@ describe('response body + type permutations', () => {
   })
 
   test('JSON route → expectJson partial + nested', async () => {
-    const client = createClient({ baseUrl: server.url })
-
     // /users/1 → { id, name, username, email } (frozen contract).
-    const res = await client
+    const res = await mock
+      .client()
       .get('/users/1')
       .expectStatus(200)
       // Partial subset match (would catch a wrong id / missing field).
@@ -245,7 +226,8 @@ describe('response body + type permutations', () => {
     })
 
     // A nested partial via a POST echo route (frozen): { ...body, id: 101 }.
-    const created = await client
+    const created = await mock
+      .client()
       .post('/posts')
       .json({ title: 't', body: 'b', userId: 1 })
       .expectStatus(201)
@@ -255,12 +237,11 @@ describe('response body + type permutations', () => {
   })
 
   test('JSON route → expectJsonStrict full equality (every key, no extras)', async () => {
-    const client = createClient({ baseUrl: server.url })
-
     // Strict equality (deep-equal): the WHOLE object must match — a missing key,
     // an extra key, or any wrong value would fail. This exercises a distinct
     // matcher (assertJsonStrict) that the subset .expectJson() above does not.
-    const res = await client
+    const res = await mock
+      .client()
       .get('/users/1')
       .expectStatus(200)
       .expectJsonStrict({
@@ -280,50 +261,37 @@ describe('assertion failure paths → AssertionError', () => {
   // no-op would flip every one of these from rejecting to resolving.
 
   test('expectStatus mismatch rejects with AssertionError naming expected/actual', async () => {
-    const client = createClient({ baseUrl: server.url })
-
-    // /text returns 200; asserting 404 must throw. `.send()` returns a real
-    // Promise (the builder itself is only a thenable) so `.rejects` can assert.
-    const promise = client.get('/text').expectStatus(404).send()
-    await expect(promise).rejects.toThrow(AssertionError)
-    await expect(promise).rejects.toThrow(/expected status 404 but got 200/)
-    // The message identifies the request (method + url) so failures are locatable.
-    await expect(promise).rejects.toThrow(/GET .*\/text/)
+    // /text returns 200; asserting 404 must throw with expected/actual + the
+    // request identity (method + url).
+    const err = await captureAssertion(mock.client().get('/text').expectStatus(404))
+    expect(err.message).toMatch(/expected status 404 but got 200/)
+    expect(err.message).toMatch(/GET .*\/text/)
   })
 
   test('expectJson subset mismatch rejects with a path-level diff', async () => {
-    const client = createClient({ baseUrl: server.url })
-
     // /users/1 has username 'ada'; assert a wrong value and a missing key.
-    const promise = client
-      .get('/users/1')
-      .expectJson({ username: 'NOT-ada', nope: 'x' })
-      .send()
-
-    await expect(promise).rejects.toThrow(AssertionError)
+    const err = await captureAssertion(
+      mock.client().get('/users/1').expectJson({ username: 'NOT-ada', nope: 'x' }),
+    )
     // The structured diff calls out the offending paths.
-    await expect(promise).rejects.toThrow(/username/)
-    await expect(promise).rejects.toThrow(/nope.*missing/)
+    expect(err.message).toMatch(/username/)
+    expect(err.message).toMatch(/nope.*missing/)
   })
 
   test('expectText mismatch rejects with AssertionError showing the actual text', async () => {
-    const client = createClient({ baseUrl: server.url })
-
     // /text is 'hello world'; a regex that cannot match must throw.
-    const promise = client.get('/text').expectText(/goodbye/).send()
-    await expect(promise).rejects.toThrow(AssertionError)
-    await expect(promise).rejects.toThrow(/expected response text to match/)
+    const err = await captureAssertion(mock.client().get('/text').expectText(/goodbye/))
+    expect(err.message).toMatch(/expected response text to match/)
     // The actual body is surfaced in the message.
-    await expect(promise).rejects.toThrow(/hello world/)
+    expect(err.message).toMatch(/hello world/)
   })
 
   test('expectHeader mismatch rejects and reports the actual header value', async () => {
-    const client = createClient({ baseUrl: server.url })
-
     // x-powered-by is 'vouch-mock'; asserting a different exact value must throw.
-    const promise = client.get('/text').expectHeader('x-powered-by', 'express').send()
-    await expect(promise).rejects.toThrow(AssertionError)
-    await expect(promise).rejects.toThrow(/x-powered-by/)
-    await expect(promise).rejects.toThrow(/vouch-mock/)
+    const err = await captureAssertion(
+      mock.client().get('/text').expectHeader('x-powered-by', 'express'),
+    )
+    expect(err.message).toMatch(/x-powered-by/)
+    expect(err.message).toMatch(/vouch-mock/)
   })
 })

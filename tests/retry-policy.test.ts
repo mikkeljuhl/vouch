@@ -1,6 +1,12 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import { describe, expect, test } from 'bun:test'
 import { createClient } from '../src/client'
 import { computeRetryDelay, parseRetryAfter } from '../src/builder'
+import { installMockFetch } from './support/mock-fetch'
+
+/** Build a plain Response with the given text body/status. */
+function res(body: string, status: number): Response {
+  return new Response(body, { status })
+}
 
 describe('computeRetryDelay (pure)', () => {
   test('fixed backoff returns a constant delayMs', () => {
@@ -64,54 +70,42 @@ describe('parseRetryAfter', () => {
 })
 
 describe('retry policy loop (mocked fetch)', () => {
-  const realFetch = globalThis.fetch
-  let fetchMock: ReturnType<typeof mock>
-
-  beforeEach(() => {
-    fetchMock = mock(async () => new Response('ok', { status: 200 }))
-    globalThis.fetch = fetchMock as unknown as typeof fetch
-  })
-
-  afterEach(() => {
-    globalThis.fetch = realFetch
-  })
+  const fetch = installMockFetch()
 
   const client = () => createClient({ baseUrl: 'https://api.example.com' })
 
   test('default policy retries 429: 429 → 200 with times:1 makes 2 calls, resolves 200', async () => {
-    fetchMock.mockResolvedValueOnce(new Response('rate', { status: 429 }))
-    fetchMock.mockResolvedValueOnce(new Response('ok', { status: 200 }))
-    const res = await client().get('/x').retry({ times: 1 }).expectStatus(200)
-    expect(fetchMock).toHaveBeenCalledTimes(2)
-    expect(res.status).toBe(200)
+    fetch.sequence(res('rate', 429), res('ok', 200))
+    const result = await client().get('/x').retry({ times: 1 }).expectStatus(200)
+    expect(fetch.callCount).toBe(2)
+    expect(result.status).toBe(200)
   })
 
   test('a `when` predicate overrides the default: retries 503 but not 429', async () => {
     // 429 first; predicate only retries 503, so no retry → one call, surfaces 429.
-    fetchMock.mockResolvedValueOnce(new Response('rate', { status: 429 }))
-    const res = await client()
+    fetch.sequence(res('rate', 429), res('ok', 200))
+    const result = await client()
       .get('/x')
       .retry({ times: 2, when: (r) => r.status === 503 })
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(res.status).toBe(429)
+    expect(fetch.callCount).toBe(1)
+    expect(result.status).toBe(429)
   })
 
   test('a `when` predicate retries 503', async () => {
-    fetchMock.mockResolvedValueOnce(new Response('boom', { status: 503 }))
-    fetchMock.mockResolvedValueOnce(new Response('ok', { status: 200 }))
-    const res = await client()
+    fetch.sequence(res('boom', 503), res('ok', 200))
+    const result = await client()
       .get('/x')
       .retry({ times: 1, when: (r) => r.status === 503 })
       .expectStatus(200)
-    expect(fetchMock).toHaveBeenCalledTimes(2)
-    expect(res.status).toBe(200)
+    expect(fetch.callCount).toBe(2)
+    expect(result.status).toBe(200)
   })
 
   test('exhausted 429 still surfaces to assertions', async () => {
-    fetchMock.mockResolvedValue(new Response('rate', { status: 429 }))
+    fetch.respond(res('rate', 429))
     await expect(
       client().get('/x').retry({ times: 1 }).expectStatus(200).send(),
     ).rejects.toThrow(/200/)
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetch.callCount).toBe(2)
   })
 })

@@ -1,9 +1,14 @@
 /**
- * Dogfood example — a real multipart file upload that round-trips through the
- * in-process `Bun.serve` mock's echo endpoint. This proves `.multipart()/.file()`
- * and the `fixture()` helper end to end (correct multipart boundary set by fetch,
- * the file bytes arriving intact) over real HTTP, while staying hermetic — no
- * external network, deterministic, runnable offline.
+ * Dogfood example — UPLOAD = multipart bodies + the `fixture()` helper.
+ *
+ * This file shows how to send a real `multipart/form-data` request: text fields
+ * via `.multipart()`, a file via `.file()`, and the bytes loaded from disk with
+ * the `fixture()` helper. It round-trips through the mock's echo endpoint to prove
+ * the file arrives intact over real HTTP — while staying hermetic (no external
+ * network, deterministic, runnable offline).
+ *
+ * Setup (start/stop the mock) is delegated to `useMockServer()`; the builder chain
+ * is kept INLINE so the multipart usage reads as reference material.
  *
  * Endpoint: POST /post on the mock. It parses `await request.formData()` and
  * returns a controlled shape:
@@ -12,9 +17,9 @@
  * bytes arrived. String fields are echoed under `.form`.
  */
 
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { createClient, fixture, type Client } from '../../src/index'
-import { startMockServer } from '../support/mock-server'
+import { describe, expect, test } from 'bun:test'
+import { fixture } from '../../src/index'
+import { useMockServer } from '../support/mock-client'
 
 interface EchoResponse {
   files: Record<string, string>
@@ -22,27 +27,22 @@ interface EchoResponse {
   headers: Record<string, string>
 }
 
-describe('upload (mock server)', () => {
-  let client: Client
-  let server: { url: string; stop(): void }
+describe('upload (mock server) — multipart + fixture()', () => {
+  const mock = useMockServer()
 
-  beforeAll(() => {
-    server = startMockServer()
-    client = createClient({
-      baseUrl: process.env.API_BASE_URL || server.url,
-      timeoutMs: 20_000,
-      retry: { times: 0 },
-    })
-  })
-
-  afterAll(() => server.stop())
-
-  test('multipart file upload round-trips the zip + a field', async () => {
+  test('multipart file upload round-trips the zip + a text field', async () => {
+    // fixture(baseUrl, relativePath, contentType) loads bytes relative to THIS
+    // module and tags them with a content-type — the ergonomic way to attach a
+    // file that lives next to your test.
     const zip = fixture(import.meta.url, '../fixtures/sample.zip', 'application/zip')
 
-    const res = await client
+    const res = await mock
+      .client()
       .post<EchoResponse>('/post')
+      // .multipart() sets the body to form-data and seeds the text fields.
       .multipart({ note: 'hello' })
+      // .file(fieldName, data, filename) attaches a file part. fetch computes the
+      // multipart boundary for us; no manual content-type wrangling.
       .file('archive', zip, 'sample.zip')
       .expectStatus(200)
 

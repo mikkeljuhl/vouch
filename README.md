@@ -179,6 +179,26 @@ API_BASE_URL=https://your.api bun test
 
 ---
 
+## Examples
+
+The canonical, runnable usage examples live in
+[`tests/example/`](./tests/example) — doc-quality, hermetic tests you can read
+and run (`bun test tests/example`):
+
+- [`users.test.ts`](./tests/example/users.test.ts) — the basics (client, headers,
+  query, status/header/JSON assertions).
+- [`posts.test.ts`](./tests/example/posts.test.ts) — chaining, the CRUD
+  lifecycle, retry, and schema.
+- [`upload.test.ts`](./tests/example/upload.test.ts) — multipart uploads + the
+  `fixture()` helper.
+- [`auth.test.ts`](./tests/example/auth.test.ts) — auth/sessions (cookie jar +
+  the `beforeRequest` signing hook).
+
+Reusable test helpers (the in-process mock server, mock fetch/client, shared
+scenarios and assertions) live in [`tests/support/`](./tests/support).
+
+---
+
 ## API reference
 
 ### `createClient(options): Client`

@@ -6,36 +6,17 @@
  * regression in the message would be caught, not just a thrown-vs-not check.
  */
 
-import { describe, test, expect, beforeAll, afterAll } from 'bun:test'
-import { createClient, AssertionError, type StandardSchemaV1 } from '../../src/index'
-import { startMockServer } from '../support/mock-server'
+import { describe, test, expect, beforeAll } from 'bun:test'
+import { createClient, type StandardSchemaV1 } from '../../src/index'
+import { useMockServer } from '../support/mock-client'
+import { captureAssertion } from '../support/assert'
 
-let server: { url: string; stop(): void }
+const mock = useMockServer()
 let client: ReturnType<typeof createClient>
 
 beforeAll(() => {
-  server = startMockServer()
-  client = createClient({ baseUrl: server.url })
+  client = mock.client()
 })
-
-afterAll(() => {
-  server.stop()
-})
-
-/**
- * Run an awaitable that is expected to reject with an `AssertionError`, and
- * return that error so the test can assert on its message. Fails the test if it
- * does NOT throw (so a silently-passing assertion is caught).
- */
-async function captureAssertionError(run: () => PromiseLike<unknown>): Promise<AssertionError> {
-  try {
-    await run()
-  } catch (error) {
-    expect(error).toBeInstanceOf(AssertionError)
-    return error as AssertionError
-  }
-  throw new Error('expected an AssertionError to be thrown, but the assertion passed')
-}
 
 describe('expectStatus', () => {
   test('passes when the status matches', async () => {
@@ -44,7 +25,7 @@ describe('expectStatus', () => {
   })
 
   test('fails with a message naming expected vs actual', async () => {
-    const err = await captureAssertionError(() =>
+    const err = await captureAssertion(() =>
       client.get('/status/404').expectStatus(200),
     )
     expect(err.message).toContain('expected status 200')
@@ -62,7 +43,7 @@ describe('expectHeader', () => {
   })
 
   test('fails (string) with a message naming the header and values', async () => {
-    const err = await captureAssertionError(() =>
+    const err = await captureAssertion(() =>
       client.get('/text').expectHeader('x-powered-by', 'express'),
     )
     expect(err.message).toContain('x-powered-by')
@@ -71,7 +52,7 @@ describe('expectHeader', () => {
   })
 
   test('fails (RegExp) with a message naming the pattern', async () => {
-    const err = await captureAssertionError(() =>
+    const err = await captureAssertion(() =>
       client.get('/text').expectHeader('content-type', /application\/json/),
     )
     expect(err.message).toContain('content-type')
@@ -82,7 +63,7 @@ describe('expectHeader', () => {
   test('fails (missing header) with a <missing> marker, not a stray null', async () => {
     // The header simply isn't present → the message must distinguish "absent"
     // from an empty/null value via the explicit <missing> marker.
-    const err = await captureAssertionError(() =>
+    const err = await captureAssertion(() =>
       client.get('/text').expectHeader('x-does-not-exist', 'whatever'),
     )
     expect(err.message).toContain('x-does-not-exist')
@@ -103,7 +84,7 @@ describe('expectJson (subset)', () => {
 
   test('fails on a nested value mismatch — diff lists the nested path', async () => {
     const payload = { team: { id: 7, name: 'red' } }
-    const err = await captureAssertionError(() =>
+    const err = await captureAssertion(() =>
       client.post('/echo').json(payload).expectJson(echoed({ team: { id: 999 } })),
     )
     expect(err.message).toContain('subset')
@@ -115,7 +96,7 @@ describe('expectJson (subset)', () => {
 
   test('fails on a missing key — diff names the missing path', async () => {
     const payload = { team: { id: 7 } }
-    const err = await captureAssertionError(() =>
+    const err = await captureAssertion(() =>
       client
         .post('/echo')
         .json(payload)
@@ -135,7 +116,7 @@ describe('expectJsonStrict', () => {
 
   test('fails on an EXTRA key — diff reports "unexpected key" at the path', async () => {
     const payload = { id: 1, userId: 1, title: 't', body: 'b' }
-    const err = await captureAssertionError(() =>
+    const err = await captureAssertion(() =>
       // Expected omits `body`, so actual has an extra key.
       client.put('/posts/1').json(payload).expectJsonStrict({ id: 1, userId: 1, title: 't' }),
     )
@@ -148,7 +129,7 @@ describe('expectJsonStrict', () => {
     // user 1 owns posts 1 & 2 (frozen mock contract) → /posts?userId=1 yields a
     // 2-element array. Expecting a 1-element array hits the strict `length` diff
     // path, which short-circuits without recursing into elements.
-    const err = await captureAssertionError(() =>
+    const err = await captureAssertion(() =>
       client
         .get('/posts?userId=1')
         .expectJsonStrict([{ id: 1, userId: 1, title: 'first post', body: 'first body' }]),
@@ -170,7 +151,7 @@ describe('expectText / expectBody', () => {
   })
 
   test('expectText fails with a message showing the missing match and the actual', async () => {
-    const err = await captureAssertionError(() =>
+    const err = await captureAssertion(() =>
       client.get('/text').expectText('goodbye'),
     )
     expect(err.message).toContain('goodbye')
@@ -180,7 +161,7 @@ describe('expectText / expectBody', () => {
   test('expectText fails (RegExp) and surfaces the pattern + the actual text', async () => {
     // Distinct from the string-substring failure above: this exercises the
     // RegExp branch of assertText, whose message renders the pattern itself.
-    const err = await captureAssertionError(() =>
+    const err = await captureAssertion(() =>
       client.get('/text').expectText(/good-?bye/),
     )
     expect(err.message).toContain('/good-?bye/')
@@ -193,7 +174,7 @@ describe('expectText / expectBody', () => {
   })
 
   test('expectBody fails with a message showing expected vs actual', async () => {
-    const err = await captureAssertionError(() =>
+    const err = await captureAssertion(() =>
       client.get('/text').expectBody('hello'),
     )
     expect(err.message).toContain('hello world')
@@ -210,7 +191,7 @@ describe('expectSchema — predicate', () => {
   })
 
   test('fails when the predicate returns false', async () => {
-    const err = await captureAssertionError(() =>
+    const err = await captureAssertion(() =>
       // /text is plain text → body is a string → predicate returns false.
       client.get('/text').expectSchema(isUser),
     )
@@ -238,13 +219,13 @@ describe('expectSchema — Standard Schema (sync)', () => {
 
   test('passes when validate reports no issues', async () => {
     // GET /me with a seeded cookie → { user: 'ada' }.
-    const c = createClient({ baseUrl: server.url, cookies: true })
+    const c = mock.client({ cookies: true })
     c.cookies.set('session', 'abc123')
     await c.get('/me').expectSchema(userIsAda)
   })
 
   test('fails listing the issue message and path', async () => {
-    const err = await captureAssertionError(() =>
+    const err = await captureAssertion(() =>
       // /users/1 has no `user` field → schema reports an issue at path `user`.
       client.get('/users/1').expectSchema(userIsAda),
     )
@@ -274,7 +255,7 @@ describe('expectSchema — Standard Schema (async)', () => {
   })
 
   test('fails (async) and surfaces the issue message', async () => {
-    const err = await captureAssertionError(() =>
+    const err = await captureAssertion(() =>
       client.get('/users/1').expectSchema(isArrayAsync),
     )
     expect(err.message).toContain('expected an array')
@@ -290,7 +271,7 @@ describe('expectUnder', () => {
   })
 
   test('fails for a slow endpoint against a tight threshold', async () => {
-    const err = await captureAssertionError(() =>
+    const err = await captureAssertion(() =>
       // /delay/300 sleeps ~300ms, well over the 20ms bound.
       client.get('/delay/300').expectUnder(20),
     )
@@ -315,7 +296,7 @@ describe('fail-fast ordering', () => {
       },
     }
 
-    const err = await captureAssertionError(() =>
+    const err = await captureAssertion(() =>
       client
         .get('/status/500')
         .expectStatus(200) // fails first
