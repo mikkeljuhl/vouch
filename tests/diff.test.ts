@@ -8,7 +8,6 @@
 
 import { describe, expect, test } from 'bun:test'
 import {
-  AssertionError,
   assertJson,
   assertJsonStrict,
   deepEqual,
@@ -16,28 +15,23 @@ import {
   isSubset,
   type AssertContext,
 } from '../src/assert'
+import { captureAssertion } from './support/assert'
 
 const ctx: AssertContext = { method: 'GET', url: 'https://api/users/1' }
 
 /** Capture the message of the AssertionError thrown by `fn`, or fail. */
-function messageOf(fn: () => void): string {
-  try {
-    fn()
-  } catch (err) {
-    expect(err).toBeInstanceOf(AssertionError)
-    return (err as AssertionError).message
-  }
-  throw new Error('expected the assertion to throw, but it did not')
+function messageOf(fn: () => void): Promise<string> {
+  return captureAssertion(fn).then((err) => err.message)
 }
 
 describe('message format', () => {
-  test('carries the method + url prefix', () => {
-    const msg = messageOf(() => assertJson(ctx, { role: 'admin' }, { role: 'user' }))
+  test('carries the method + url prefix', async () => {
+    const msg = await messageOf(() => assertJson(ctx, { role: 'admin' }, { role: 'user' }))
     expect(msg.startsWith('GET https://api/users/1 — ')).toBe(true)
   })
 
-  test('nested value mismatch shows path + expected/received', () => {
-    const msg = messageOf(() =>
+  test('nested value mismatch shows path + expected/received', async () => {
+    const msg = await messageOf(() =>
       assertJson(ctx, { team: { id: 7 } }, { team: { id: 9 } }),
     )
     expect(msg).toContain('team.id')
@@ -45,23 +39,23 @@ describe('message format', () => {
     expect(msg).toContain('received 9')
   })
 
-  test('missing key (subset) is reported as missing', () => {
-    const msg = messageOf(() => assertJson(ctx, { profile: { x: 1 } }, { other: true }))
+  test('missing key (subset) is reported as missing', async () => {
+    const msg = await messageOf(() => assertJson(ctx, { profile: { x: 1 } }, { other: true }))
     expect(msg).toContain('profile')
     expect(msg).toContain('missing')
   })
 
-  test('extra key: strict REPORTS it, subset does NOT', () => {
+  test('extra key: strict REPORTS it, subset does NOT', async () => {
     // subset: extra key in actual is allowed → passes (no throw).
     expect(() => assertJson(ctx, { a: 1 }, { a: 1, b: 2 })).not.toThrow()
     // strict: extra key in actual is reported as unexpected.
-    const msg = messageOf(() => assertJsonStrict(ctx, { a: 1 }, { a: 1, b: 2 }))
+    const msg = await messageOf(() => assertJsonStrict(ctx, { a: 1 }, { a: 1, b: 2 }))
     expect(msg).toContain('b')
     expect(msg).toContain('unexpected key')
   })
 
-  test('array element mismatch shows indexed path', () => {
-    const msg = messageOf(() =>
+  test('array element mismatch shows indexed path', async () => {
+    const msg = await messageOf(() =>
       assertJson(ctx, { items: [{ id: 1 }, { id: 2 }, { id: 3 }] }, {
         items: [{ id: 1 }, { id: 2 }, { id: 99 }],
       }),
@@ -69,14 +63,14 @@ describe('message format', () => {
     expect(msg).toContain('items[2].id')
   })
 
-  test('array length mismatch produces a length diff', () => {
-    const msg = messageOf(() => assertJson(ctx, { items: [1, 2, 3] }, { items: [1, 2] }))
+  test('array length mismatch produces a length diff', async () => {
+    const msg = await messageOf(() => assertJson(ctx, { items: [1, 2, 3] }, { items: [1, 2] }))
     expect(msg).toContain('items')
     expect(msg).toContain('array length expected 3 received 2')
   })
 
-  test('type mismatch: expected number got string', () => {
-    const msg = messageOf(() => assertJson(ctx, { id: 7 }, { id: '7' }))
+  test('type mismatch: expected number got string', async () => {
+    const msg = await messageOf(() => assertJson(ctx, { id: 7 }, { id: '7' }))
     const diffs = diffJson({ id: 7 }, { id: '7' }, 'subset')
     expect(diffs[0]?.kind).toBe('type')
     expect(msg).toContain('id')
@@ -90,34 +84,34 @@ describe('message format', () => {
     expect(diffs[0]?.path).toBe('team')
   })
 
-  test('root-level mismatch shows (root)', () => {
-    const msg = messageOf(() => assertJsonStrict(ctx, { a: 1 }, 'a string'))
+  test('root-level mismatch shows (root)', async () => {
+    const msg = await messageOf(() => assertJsonStrict(ctx, { a: 1 }, 'a string'))
     expect(msg).toContain('(root)')
   })
 
-  test('values are truncated so one huge field cannot flood the line', () => {
+  test('values are truncated so one huge field cannot flood the line', async () => {
     const huge = 'x'.repeat(500)
-    const msg = messageOf(() => assertJson(ctx, { blob: huge }, { blob: 'small' }))
+    const msg = await messageOf(() => assertJson(ctx, { blob: huge }, { blob: 'small' }))
     expect(msg).toContain('truncated')
     expect(msg).not.toContain('x'.repeat(200))
   })
 
-  test('caps the diff lines and appends "… and N more"', () => {
+  test('caps the diff lines and appends "… and N more"', async () => {
     const expected: Record<string, number> = {}
     const actual: Record<string, number> = {}
     for (let i = 0; i < 30; i++) {
       expected[`k${i}`] = 1
       actual[`k${i}`] = 2
     }
-    const msg = messageOf(() => assertJson(ctx, expected, actual))
+    const msg = await messageOf(() => assertJson(ctx, expected, actual))
     expect(msg).toContain('(30 differences)')
     expect(msg).toContain('and 10 more')
     // Only the first 20 bullet lines are rendered.
     expect(msg.split('•').length - 1).toBe(20)
   })
 
-  test('single difference uses singular noun', () => {
-    const msg = messageOf(() => assertJson(ctx, { a: 1 }, { a: 2 }))
+  test('single difference uses singular noun', async () => {
+    const msg = await messageOf(() => assertJson(ctx, { a: 1 }, { a: 2 }))
     expect(msg).toContain('(1 difference)')
   })
 })

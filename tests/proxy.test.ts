@@ -1,32 +1,16 @@
 /**
  * Proxy forwarding (DESIGN.md §4). The `proxy` client option and the per-request
  * `.proxy()` builder method are forwarded to Bun's `fetch` as its `proxy` init
- * field. fetch is stubbed and restored after each test so nothing leaks into the
- * live suite.
+ * field. fetch is stubbed via the shared helper (auto-restored) so nothing leaks
+ * into the live suite.
  */
 
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import { describe, expect, test } from 'bun:test'
 import { createClient } from '../src/client'
-
-/** Bun's fetch init carries an extra `proxy` field beyond the DOM RequestInit. */
-type FetchInit = RequestInit & { proxy?: string }
+import { installMockFetch } from './support/mock-fetch'
 
 describe('proxy forwarding (mocked fetch)', () => {
-  const realFetch = globalThis.fetch
-  let calls: { url: string; init: FetchInit }[]
-
-  beforeEach(() => {
-    calls = []
-    const fetchMock = mock(async (url: string, init: FetchInit) => {
-      calls.push({ url, init })
-      return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } })
-    })
-    globalThis.fetch = fetchMock as unknown as typeof fetch
-  })
-
-  afterEach(() => {
-    globalThis.fetch = realFetch
-  })
+  const fetch = installMockFetch()
 
   test('client-level proxy is forwarded to fetch', async () => {
     const client = createClient({
@@ -34,7 +18,7 @@ describe('proxy forwarding (mocked fetch)', () => {
       proxy: 'http://proxy.local:8080',
     })
     await client.get('/x')
-    expect(calls[0].init.proxy).toBe('http://proxy.local:8080')
+    expect(fetch.lastCall!.proxy).toBe('http://proxy.local:8080')
   })
 
   test('client-level proxy is exposed on the client', () => {
@@ -48,19 +32,19 @@ describe('proxy forwarding (mocked fetch)', () => {
       proxy: 'http://default-proxy:8080',
     })
     await client.get('/x').proxy('http://override-proxy:9090')
-    expect(calls[0].init.proxy).toBe('http://override-proxy:9090')
+    expect(fetch.lastCall!.proxy).toBe('http://override-proxy:9090')
   })
 
   test('per-request .proxy() works with no client default', async () => {
     const client = createClient({ baseUrl: 'https://api.example.com' })
     await client.post('/y').json({ a: 1 }).proxy('http://only-here:7070')
-    expect(calls[0].init.proxy).toBe('http://only-here:7070')
+    expect(fetch.lastCall!.proxy).toBe('http://only-here:7070')
   })
 
   test('no proxy configured ⇒ no proxy is sent', async () => {
     const client = createClient({ baseUrl: 'https://api.example.com' })
     await client.get('/x')
-    expect(calls[0].init.proxy).toBeUndefined()
+    expect(fetch.lastCall!.proxy).toBeUndefined()
   })
 
   test('proxy is forwarded even with a beforeRequest hook (independent of headers)', async () => {
@@ -72,8 +56,7 @@ describe('proxy forwarding (mocked fetch)', () => {
       },
     })
     await client.get('/x')
-    expect(calls[0].init.proxy).toBe('http://hooked-proxy:8080')
-    const h = calls[0].init.headers as Record<string, string>
-    expect(h['x-signed']).toBe('yes')
+    expect(fetch.lastCall!.proxy).toBe('http://hooked-proxy:8080')
+    expect(fetch.lastCall!.headers['x-signed']).toBe('yes')
   })
 })

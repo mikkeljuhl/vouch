@@ -2,44 +2,29 @@
  * Mocked, deterministic coverage for the two new assertions:
  * `.expectUnder(ms)` (latency / `durationMs`) and `.expectSchema(schema)`
  * (predicate + Standard Schema, sync and async). Also re-checks fail-fast under
- * the new async assertion loop. Stubs `globalThis.fetch` and restores it in
- * `afterEach` so the live suites never see the mock.
+ * the new async assertion loop. Uses the shared mock-fetch helper so the live
+ * suites never see the stub.
  */
 
-import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from 'bun:test'
+import { describe, expect, mock, spyOn, test } from 'bun:test'
 import { createClient } from '../src/client'
 import { AssertionError, type StandardSchemaV1 } from '../src/index'
-
-/** Build a JSON Response with the given body/status/headers. */
-function jsonResponse(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'content-type': 'application/json', ...headers },
-  })
-}
+import { installMockFetch, jsonResponse } from './support/mock-fetch'
 
 describe('new assertions (mocked fetch)', () => {
-  const realFetch = globalThis.fetch
-  let fetchMock: ReturnType<typeof mock>
-
-  beforeEach(() => {
-    fetchMock = mock(async () => jsonResponse({ ok: true }))
-    globalThis.fetch = fetchMock as unknown as typeof fetch
-  })
-
-  afterEach(() => {
-    globalThis.fetch = realFetch
-  })
+  const fetch = installMockFetch()
 
   const client = () => createClient({ baseUrl: 'https://api.example.com' })
 
+  /** A factory that resolves after a small delay so durationMs is non-trivial. */
+  const slowJson = (body: unknown, status?: number) => async () => {
+    await new Promise((r) => setTimeout(r, 25))
+    return jsonResponse(body, { status })
+  }
+
   describe('.expectUnder', () => {
     test('passes under a generous budget and exposes durationMs ≥ 0', async () => {
-      // Resolve after a small delay so durationMs is measurably non-trivial.
-      fetchMock.mockImplementationOnce(async () => {
-        await new Promise((r) => setTimeout(r, 25))
-        return jsonResponse({ ok: true })
-      })
+      fetch.respond(slowJson({ ok: true }))
 
       const res = await client().get('/x').expectUnder(1000)
       expect(typeof res.durationMs).toBe('number')
@@ -47,19 +32,13 @@ describe('new assertions (mocked fetch)', () => {
     })
 
     test('throws AssertionError when the request exceeds the budget', async () => {
-      fetchMock.mockImplementationOnce(async () => {
-        await new Promise((r) => setTimeout(r, 25))
-        return jsonResponse({ ok: true })
-      })
+      fetch.respond(slowJson({ ok: true }))
 
       await expect(client().get('/x').expectUnder(1).send()).rejects.toThrow(AssertionError)
     })
 
     test('the failure message names the budget and the measured time', async () => {
-      fetchMock.mockImplementationOnce(async () => {
-        await new Promise((r) => setTimeout(r, 25))
-        return jsonResponse({ ok: true })
-      })
+      fetch.respond(slowJson({ ok: true }))
 
       await expect(client().get('/x').expectUnder(1).send()).rejects.toThrow(/under 1ms but took \d+ms/)
     })
@@ -67,13 +46,13 @@ describe('new assertions (mocked fetch)', () => {
 
   describe('.expectSchema (predicate)', () => {
     test('passing predicate resolves', async () => {
-      fetchMock.mockResolvedValueOnce(jsonResponse({ id: 1 }))
+      fetch.json({ id: 1 })
       const isObject = (b: unknown) => typeof b === 'object' && b !== null
       await expect(client().get('/x').expectSchema(isObject).send()).resolves.toBeDefined()
     })
 
     test('failing predicate throws AssertionError', async () => {
-      fetchMock.mockResolvedValueOnce(jsonResponse({ id: 1 }))
+      fetch.json({ id: 1 })
       const alwaysFalse = () => false
       await expect(client().get('/x').expectSchema(alwaysFalse).send()).rejects.toThrow(AssertionError)
     })
@@ -96,19 +75,19 @@ describe('new assertions (mocked fetch)', () => {
     }
 
     test('sync schema that succeeds resolves', async () => {
-      fetchMock.mockResolvedValueOnce(jsonResponse({ id: 42 }))
+      fetch.json({ id: 42 })
       await expect(client().get('/x').expectSchema(numberIdSchema()).send()).resolves.toBeDefined()
     })
 
     test('sync schema with issues throws and the message includes the issue text + path', async () => {
-      fetchMock.mockResolvedValueOnce(jsonResponse({ id: 'nope' }))
+      fetch.json({ id: 'nope' })
       await expect(client().get('/x').expectSchema(numberIdSchema()).send()).rejects.toThrow(
         /id: id must be a number/,
       )
     })
 
     test('async schema (validate returns a Promise) is awaited by the loop', async () => {
-      fetchMock.mockResolvedValueOnce(jsonResponse({ name: 'Ada' }))
+      fetch.json({ name: 'Ada' })
       const asyncSchema: StandardSchemaV1 = {
         '~standard': {
           version: 1,
@@ -125,7 +104,7 @@ describe('new assertions (mocked fetch)', () => {
     })
 
     test('async schema that reports issues rejects with the issue message', async () => {
-      fetchMock.mockResolvedValueOnce(jsonResponse({ name: 123 }))
+      fetch.json({ name: 123 })
       const asyncSchema: StandardSchemaV1 = {
         '~standard': {
           version: 1,
@@ -143,7 +122,7 @@ describe('new assertions (mocked fetch)', () => {
   })
 
   test('fail-fast holds under the async loop: a failing earlier assertion blocks a later one', async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse({ id: 1 }, 500))
+    fetch.json({ id: 1 }, { status: 500 })
 
     // A later async schema whose validate is spied: it must never run because the
     // earlier expectStatus(200) throws first.
@@ -162,7 +141,7 @@ describe('new assertions (mocked fetch)', () => {
   })
 
   test('fail-fast: a failing async schema prevents a later assertion from running', async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse({ id: 1 }, 200))
+    fetch.json({ id: 1 }, { status: 200 })
 
     const failingSchema: StandardSchemaV1 = {
       '~standard': {

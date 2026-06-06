@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, mock, test } from 'bun:test'
+import { describe, expect, test } from 'bun:test'
 import { createClient } from '../src/client'
 import {
   redactHeaders,
@@ -7,6 +7,8 @@ import {
   DEFAULT_SENSITIVE_HEADERS,
   REDACTION_MASK,
 } from '../src/redact'
+import { installMockFetch } from './support/mock-fetch'
+import { captureAssertion } from './support/assert'
 
 /** Pure redaction helpers + the assertion-diff propagation surface. */
 describe('redactHeaders', () => {
@@ -81,35 +83,20 @@ describe('redactBodyKeys', () => {
 })
 
 describe('assertion diff redaction', () => {
-  const realFetch = globalThis.fetch
-  afterEach(() => {
-    globalThis.fetch = realFetch
-  })
+  const fetch = installMockFetch()
 
   test('redact.bodyKeys masks the token value in the thrown AssertionError while showing other diffs', async () => {
-    const fetchMock = mock(
-      async () =>
-        new Response(JSON.stringify({ token: 'REALSECRETVALUE', role: 'user' }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        }),
-    )
-    globalThis.fetch = fetchMock as unknown as typeof fetch
+    fetch.json({ token: 'REALSECRETVALUE', role: 'user' })
 
     const client = createClient({
       baseUrl: 'https://api.example.com',
       redact: { bodyKeys: ['token'] },
     })
 
-    let thrown: unknown
-    try {
-      await client
-        .get('/session')
-        .expectJsonStrict({ token: 'expected-token', role: 'admin' })
-    } catch (e) {
-      thrown = e
-    }
-    const msg = (thrown as Error).message
+    const err = await captureAssertion(
+      client.get('/session').expectJsonStrict({ token: 'expected-token', role: 'admin' }),
+    )
+    const msg = err.message
     // The real secret never appears.
     expect(msg).not.toContain('REALSECRETVALUE')
     // The token diff line is masked.

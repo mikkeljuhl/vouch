@@ -1,5 +1,6 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import { describe, expect, test } from 'bun:test'
 import { createClient, joinUrl, resolveHeaders } from '../src/client'
+import { installMockFetch, textResponse } from './support/mock-fetch'
 
 describe('joinUrl', () => {
   test.each([
@@ -79,21 +80,14 @@ describe('createClient', () => {
   })
 
   describe('_request (with mocked fetch)', () => {
-    // Save the real fetch and restore it after each test so a stubbed fetch can
-    // never leak into the live `tests/example` suite (restoration is essential).
-    const realFetch = globalThis.fetch
-    let fetchMock: ReturnType<typeof mock>
-
-    beforeEach(() => {
-      fetchMock = mock(async () => new Response('ok', { status: 200 }))
-      globalThis.fetch = fetchMock as unknown as typeof fetch
-    })
-
-    afterEach(() => {
-      globalThis.fetch = realFetch
-    })
+    // installMockFetch installs a fresh recording fetch per test and auto-restores,
+    // so a stubbed fetch can never leak into the live suites. A fresh text body is
+    // produced per call so multi-request tests don't reuse a consumed stream.
+    const fetchMock = installMockFetch()
+    const respondOk = () => fetchMock.respond(() => textResponse('ok'))
 
     test('sends resolved headers and joined URL', async () => {
+      respondOk()
       let calls = 0
       const client = createClient({
         baseUrl: 'https://api.example.com',
@@ -108,11 +102,11 @@ describe('createClient', () => {
         headers: { 'X-Per-Request': () => 'per-req' },
       })
 
-      expect(fetchMock).toHaveBeenCalledTimes(1)
-      const [url, init] = fetchMock.mock.calls[0]
-      expect(url).toBe('https://api.example.com/users/1?expand=profile')
-      expect(init.method).toBe('GET')
-      expect(init.headers).toEqual({
+      expect(fetchMock.callCount).toBe(1)
+      const call = fetchMock.calls[0]!
+      expect(call.url).toBe('https://api.example.com/users/1?expand=profile')
+      expect(call.method).toBe('GET')
+      expect(call.headers).toEqual({
         'X-Static': 'static',
         Authorization: 'Bearer 1',
         'X-Per-Request': 'per-req',
@@ -120,11 +114,11 @@ describe('createClient', () => {
 
       // Callable re-evaluated on next request.
       await client._request('GET', '/users/2')
-      const [, init2] = fetchMock.mock.calls[1]
-      expect(init2.headers.Authorization).toBe('Bearer 2')
+      expect(fetchMock.calls[1]!.headers.Authorization).toBe('Bearer 2')
     })
 
     test('per-request headers override factory headers on the wire', async () => {
+      respondOk()
       const client = createClient({
         baseUrl: 'https://api.example.com',
         headers: { Authorization: 'factory' },
@@ -132,30 +126,29 @@ describe('createClient', () => {
 
       await client._request('POST', '/login', { headers: { authorization: 'override' } })
 
-      const [, init] = fetchMock.mock.calls[0]
-      expect(init.headers).toEqual({ authorization: 'override' })
+      expect(fetchMock.calls[0]!.headers).toEqual({ authorization: 'override' })
     })
 
     test('applies AbortSignal.timeout when timeoutMs is set', async () => {
+      respondOk()
       const client = createClient({ baseUrl: 'https://api.example.com', timeoutMs: 1000 })
       await client._request('GET', '/x')
-      const [, init] = fetchMock.mock.calls[0]
-      expect(init.signal).toBeInstanceOf(AbortSignal)
+      expect(fetchMock.calls[0]!.init?.signal).toBeInstanceOf(AbortSignal)
     })
 
     test('applies the default timeout signal when none is configured', async () => {
+      respondOk()
       const client = createClient({ baseUrl: 'https://api.example.com' })
       await client._request('GET', '/x')
-      const [, init] = fetchMock.mock.calls[0]
       // A default 30s timeout now applies instead of hanging forever.
-      expect(init.signal).toBeInstanceOf(AbortSignal)
+      expect(fetchMock.calls[0]!.init?.signal).toBeInstanceOf(AbortSignal)
     })
 
     test('timeoutMs: 0 disables the signal (escape hatch)', async () => {
+      respondOk()
       const client = createClient({ baseUrl: 'https://api.example.com', timeoutMs: 0 })
       await client._request('GET', '/x')
-      const [, init] = fetchMock.mock.calls[0]
-      expect(init.signal).toBeUndefined()
+      expect(fetchMock.calls[0]!.init?.signal).toBeUndefined()
     })
   })
 })

@@ -1,26 +1,22 @@
-import { afterEach, describe, expect, mock, test } from 'bun:test'
+import { describe, expect, test } from 'bun:test'
 import { createClient, type OutgoingRequest } from '../src/client'
+import { installMockFetch, textResponse } from './support/mock-fetch'
 
 /**
- * `beforeRequest` hook behaviour. Stubs `globalThis.fetch` and restores it in
- * `afterEach`. The hook runs inside `_request`, once per attempt, after cookies
- * and header resolution and before fetch — so it wins the precedence chain.
+ * `beforeRequest` hook behaviour. Stubs `globalThis.fetch` via installMockFetch
+ * (fresh per test, auto-restored). The hook runs inside `_request`, once per
+ * attempt, after cookies and header resolution and before fetch — so it wins the
+ * precedence chain.
  */
 describe('beforeRequest hook', () => {
-  const realFetch = globalThis.fetch
-  let fetchMock: ReturnType<typeof mock>
-
-  afterEach(() => {
-    globalThis.fetch = realFetch
-  })
+  const fetchMock = installMockFetch()
 
   function headersOf(callIndex: number): Record<string, string> {
-    return fetchMock.mock.calls[callIndex][1].headers as Record<string, string>
+    return fetchMock.calls[callIndex]!.headers
   }
 
   test('adds a signature header derived from the body, seen by fetch', async () => {
-    fetchMock = mock(async () => new Response('ok', { status: 200 }))
-    globalThis.fetch = fetchMock as unknown as typeof fetch
+    fetchMock.respond(() => textResponse('ok'))
 
     const sign = (s: string) => `sig-${s.length}`
     const client = createClient({
@@ -35,10 +31,8 @@ describe('beforeRequest hook', () => {
   })
 
   test('runs once per attempt (5xx → retry via builder)', async () => {
-    let n = 0
     // First attempt 500, second 200, so a retry of 1 produces two attempts.
-    fetchMock = mock(async () => new Response('', { status: ++n === 1 ? 500 : 200 }))
-    globalThis.fetch = fetchMock as unknown as typeof fetch
+    fetchMock.sequence(new Response('', { status: 500 }), new Response('', { status: 200 }))
 
     let hookCalls = 0
     const client = createClient({
@@ -49,13 +43,12 @@ describe('beforeRequest hook', () => {
     })
 
     await client.get('/flaky').retry({ times: 1 })
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock.callCount).toBe(2)
     expect(hookCalls).toBe(2)
   })
 
   test('async beforeRequest is awaited before fetch', async () => {
-    fetchMock = mock(async () => new Response(''))
-    globalThis.fetch = fetchMock as unknown as typeof fetch
+    fetchMock.respond(() => new Response(''))
 
     const client = createClient({
       baseUrl: 'https://api.example.com',
@@ -70,8 +63,7 @@ describe('beforeRequest hook', () => {
   })
 
   test('hook runs last and can override a cookie / auth header', async () => {
-    fetchMock = mock(async () => new Response(''))
-    globalThis.fetch = fetchMock as unknown as typeof fetch
+    fetchMock.respond(() => new Response(''))
 
     const client = createClient({
       baseUrl: 'https://api.example.com',

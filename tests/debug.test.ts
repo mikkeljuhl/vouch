@@ -1,20 +1,21 @@
-import { afterEach, describe, expect, mock, test } from 'bun:test'
+import { afterEach, describe, expect, test } from 'bun:test'
 import { createClient } from '../src/client'
+import { installMockFetch, jsonResponse } from './support/mock-fetch'
 
 /**
- * Failure-diagnostics (debug dump) behaviour. Stubs `globalThis.fetch` and
- * captures stderr by spying on `process.stderr.write`, restoring both in
- * `afterEach`. The dump reflects the ACTUAL request sent (final headers incl.
- * cookies + beforeRequest mutations) and redacts sensitive headers.
+ * Failure-diagnostics (debug dump) behaviour. The shared mock-fetch helper stubs
+ * `globalThis.fetch` (auto-restored); stderr is captured by spying on
+ * `process.stderr.write`, restored in `afterEach`. The dump reflects the ACTUAL
+ * request sent (final headers incl. cookies + beforeRequest mutations) and
+ * redacts sensitive headers.
  */
 describe('debug diagnostics', () => {
-  const realFetch = globalThis.fetch
+  const fetch = installMockFetch()
   const realStderrWrite = process.stderr.write.bind(process.stderr)
 
   let captured: string
 
   afterEach(() => {
-    globalThis.fetch = realFetch
     process.stderr.write = realStderrWrite
     delete process.env.VOUCH_DEBUG
   })
@@ -28,14 +29,8 @@ describe('debug diagnostics', () => {
     }) as typeof process.stderr.write
   }
 
-  function stubFetch(makeResponse: () => Response) {
-    const fetchMock = mock(async () => makeResponse())
-    globalThis.fetch = fetchMock as unknown as typeof fetch
-    return fetchMock
-  }
-
   test("debug: 'always' dumps on a passing request", async () => {
-    stubFetch(() => new Response('{"ok":true}', { status: 200, headers: { 'content-type': 'application/json' } }))
+    fetch.respond(() => jsonResponse({ ok: true }))
     spyStderr()
     const client = createClient({ baseUrl: 'https://api.example.com', debug: 'always' })
 
@@ -47,7 +42,7 @@ describe('debug diagnostics', () => {
   })
 
   test("debug: 'onFailure' does NOT dump on pass", async () => {
-    stubFetch(() => new Response('ok', { status: 200 }))
+    fetch.respond(() => new Response('ok', { status: 200 }))
     spyStderr()
     const client = createClient({ baseUrl: 'https://api.example.com', debug: 'onFailure' })
 
@@ -56,7 +51,7 @@ describe('debug diagnostics', () => {
   })
 
   test("debug: 'onFailure' dumps on a failed assertion and rethrows the original AssertionError", async () => {
-    stubFetch(() => new Response('nope', { status: 404 }))
+    fetch.respond(() => new Response('nope', { status: 404 }))
     spyStderr()
     const client = createClient({ baseUrl: 'https://api.example.com', debug: 'onFailure' })
 
@@ -73,7 +68,7 @@ describe('debug diagnostics', () => {
   })
 
   test('.debug() forces a dump for one request', async () => {
-    stubFetch(() => new Response('ok', { status: 200 }))
+    fetch.respond(() => new Response('ok', { status: 200 }))
     spyStderr()
     const client = createClient({ baseUrl: 'https://api.example.com' }) // debug OFF
 
@@ -90,7 +85,7 @@ describe('debug diagnostics', () => {
   test('dump masks cookie / set-cookie / authorization, omitting the secret values', async () => {
     const secretCookie = 'sid=SUPERSECRETSESSION'
     const secretAuth = 'Bearer TOPSECRETTOKEN'
-    stubFetch(
+    fetch.respond(
       () =>
         new Response('{"data":1}', {
           status: 200,
@@ -123,7 +118,7 @@ describe('debug diagnostics', () => {
   })
 
   test('dump reflects beforeRequest header mutations', async () => {
-    stubFetch(() => new Response('ok', { status: 200 }))
+    fetch.respond(() => new Response('ok', { status: 200 }))
     spyStderr()
     const client = createClient({
       baseUrl: 'https://api.example.com',
@@ -139,7 +134,7 @@ describe('debug diagnostics', () => {
   })
 
   test("VOUCH_DEBUG env var enables diagnostics (truthy ⇒ 'onFailure')", async () => {
-    stubFetch(() => new Response('ok', { status: 500 }))
+    fetch.respond(() => new Response('ok', { status: 500 }))
     spyStderr()
     process.env.VOUCH_DEBUG = '1'
     const client = createClient({ baseUrl: 'https://api.example.com' })
@@ -154,7 +149,7 @@ describe('debug diagnostics', () => {
   })
 
   test("VOUCH_DEBUG=always selects 'always' (dumps on pass)", async () => {
-    stubFetch(() => new Response('ok', { status: 200 }))
+    fetch.respond(() => new Response('ok', { status: 200 }))
     spyStderr()
     process.env.VOUCH_DEBUG = 'always'
     const client = createClient({ baseUrl: 'https://api.example.com' })
@@ -164,7 +159,7 @@ describe('debug diagnostics', () => {
   })
 
   test('request body is shown and bodyKeys masked in the dump', async () => {
-    stubFetch(() => new Response('ok', { status: 200 }))
+    fetch.respond(() => new Response('ok', { status: 200 }))
     spyStderr()
     const client = createClient({
       baseUrl: 'https://api.example.com',
