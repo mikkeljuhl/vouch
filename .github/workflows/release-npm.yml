@@ -1,0 +1,51 @@
+name: Release npm
+
+# Publish @mikkeljuhl/vouch to the public npm registry on a version tag.
+# Requires an NPM_TOKEN repo secret with publish rights to the @mikkeljuhl scope.
+# If the secret is absent, the job skips cleanly (no red run).
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check for NPM_TOKEN
+        id: tok
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -n "$NPM_TOKEN" ]; then
+            echo "has=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "NPM_TOKEN not set — skipping npm publish."
+          fi
+
+      - uses: actions/setup-node@v5
+        if: steps.tok.outputs.has == 'true'
+        with:
+          node-version: 24
+          registry-url: 'https://registry.npmjs.org'
+
+      - uses: oven-sh/setup-bun@v2
+        if: steps.tok.outputs.has == 'true'
+
+      # bun install runs `prepare` (tsc -p tsconfig.build.json), emitting dist/*.d.ts
+      # so the published tarball carries types alongside the TS source.
+      - name: Install + build types
+        if: steps.tok.outputs.has == 'true'
+        run: bun install --frozen-lockfile
+
+      # dist is already built above, so skip lifecycle scripts on publish.
+      - name: Publish
+        if: steps.tok.outputs.has == 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --ignore-scripts
