@@ -1,6 +1,6 @@
 {
   "name": "@mikkeljuhl/vouch",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "license": "MIT",
   "description": "Code-authored API test framework for Bun: a fluent builder that sends real requests and asserts on responses.",
   "author": "Mikkel Juhl",
@@ -39,7 +39,7 @@
     "dist"
   ],
   "bin": {
-    "vouch": "./cli/vouch.ts"
+    "vouch": "cli/vouch.ts"
   },
   "scripts": {
     "test": "bun test",

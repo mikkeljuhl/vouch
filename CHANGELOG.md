@@ -10,8 +10,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.3.1] - 2026-06-06
+
 ### Added
 - `vouch init [dir]` scaffolds `tests/`, an example test, and a `tsconfig.json` (`--no-install` skips `bun add`).
+
+### Fixed
+- `bin` path dropped the leading `./` (`cli/vouch.ts`) — npm was stripping the `vouch` bin on publish, which would break `bunx @mikkeljuhl/vouch`.
+- The GHCR image is now built **multi-arch** (`linux/amd64` + `linux/arm64`), so it pulls on Apple Silicon.
 
 ### Changed
 - Docs lead with the Bun local loop (`bunx @mikkeljuhl/vouch init` + `bun test --watch`) as the dev path for any backend; Docker is positioned for CI and zero-install one-offs (with a `host.docker.internal` note for hitting a local service).
@@ -51,7 +59,8 @@ fluent builder, distributed as a library, Docker image, CLI, and GitHub Action.
 - **Runtimes & distribution** — runs under Bun (default), Vitest, or `node --test`; ships TypeScript source plus generated `.d.ts`. Docker runner image, `vouch` CLI (`--junit`, `--typecheck`/`--typecheck-only`, `--version`), and a composite GitHub Action.
 - **Reporting** — JUnit via Bun, enriched with failure messages (Bun's JUnit omits them) by `scripts/ci-summary.mjs`, which also emits inline annotations + a job-summary table.
 
-[Unreleased]: https://github.com/mikkeljuhl/vouch/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/mikkeljuhl/vouch/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/mikkeljuhl/vouch/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/mikkeljuhl/vouch/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/mikkeljuhl/vouch/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/mikkeljuhl/vouch/releases/tag/v0.1.0
