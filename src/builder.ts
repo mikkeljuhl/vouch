@@ -537,9 +537,10 @@ export function createRequestBuilder<T>(
    *   If every attempt throws, the last error is rethrown.
    * - **Response-based retry** is governed by `when(res)` when provided — the
    *   predicate fully controls which responses are retried (the framework does
-   *   not hardcode 5xx when a predicate is given). When no `when` is provided
-   *   and `times > 0`, the default policy retries on 5xx responses only and
-   *   never on 2xx/3xx/4xx — so retry can never mask a real 4xx.
+   *   not hardcode statuses when a predicate is given). When no `when` is
+   *   provided and `times > 0`, the default policy retries on 5xx and 429
+   *   responses only, never on 2xx/3xx/other 4xx — so retry can never mask a
+   *   real 4xx.
    *
    * Each attempt is a fresh `_request` call and therefore gets its own
    * timeout/abort signal (timeout applies per attempt). The request body is a
