@@ -12,6 +12,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _Nothing yet._
 
+## [0.2.0] - 2026-06-06
+
+### Added
+- `proxy` option on `createClient` and a per-request `.proxy(url)`, forwarded to Bun's `fetch` (`HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` already route fetch on Bun).
+- Runner image published to GitHub Container Registry on each version tag: `docker run --rm -v "$PWD/tests:/app/tests" ghcr.io/mikkeljuhl/vouch:0.2.0`.
+- `docs/USAGE.md` usage guide.
+
+### Changed
+- Bun is now the only supported runtime; the Node/Vitest fallback is dropped. `engines` requires `bun >= 1.2.0`; the package ships TypeScript source (no `@types/node`, no `node:` imports).
+
 ## [0.1.0] - 2026-06-05
 
 First tagged release — a Bun-first, engine-agnostic API testing framework with a
@@ -29,7 +39,8 @@ fluent builder, distributed as a library, Docker image, CLI, and GitHub Action.
 - **Runtimes & distribution** — runs under Bun (default), Vitest, or `node --test`; ships TypeScript source plus generated `.d.ts`. Docker runner image, `vouch` CLI (`--junit`, `--typecheck`/`--typecheck-only`, `--version`), and a composite GitHub Action.
 - **Reporting** — JUnit via Bun, enriched with failure messages (Bun's JUnit omits them) by `scripts/ci-summary.mjs`, which also emits inline annotations + a job-summary table.
 
-[Unreleased]: https://github.com/mikkeljuhl/vouch/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/mikkeljuhl/vouch/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/mikkeljuhl/vouch/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/mikkeljuhl/vouch/releases/tag/v0.1.0
 
 ---

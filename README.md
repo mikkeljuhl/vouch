@@ -62,21 +62,20 @@ the framework by its package name `@mikkeljuhl/vouch` (resolved through a
 `node_modules` symlink baked into the image, which points at the shipped TS
 source).
 
+The image is published to GitHub Container Registry on each release:
+
 ```sh
-docker build -t vouch .
-
-# Self-test: run the baked dogfood suite.
-docker run --rm vouch
-
 # Run YOUR tests by mounting them over /app/tests:
-docker run --rm -v "$PWD/tests:/app/tests" vouch
+docker run --rm -v "$PWD/tests:/app/tests" ghcr.io/mikkeljuhl/vouch:0.2.0
 
 # Emit JUnit to the host:
 docker run --rm \
   -v "$PWD/tests:/app/tests" \
   -v "$PWD/reports:/app/reports" \
-  vouch --reporter=junit --reporter-outfile=/app/reports/junit.xml
+  ghcr.io/mikkeljuhl/vouch:0.2.0 --reporter=junit --reporter-outfile=/app/reports/junit.xml
 ```
+
+Or build it yourself from the `Dockerfile` (`docker build -t vouch .`); `docker run --rm vouch` self-tests the baked dogfood suite.
 
 ### 3. CI (GitHub Actions)
 
@@ -91,7 +90,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v5
-      - uses: mikkeljuhl/vouch@v0.1.0    # pin a release tag (or @main for latest)
+      - uses: mikkeljuhl/vouch@v0.2.0    # pin a release tag (or @main for latest)
         with:
           typecheck: 'true'              # optional; runs tsc --noEmit first
           # paths: tests                 # optional; default = all discovered tests
@@ -689,7 +688,7 @@ Semantic Versioning. The version in `package.json` is the single source of truth
 the `VERSION` export and `vouch --version` both read it. While on `0.x` the public
 API may change in a minor release; changes are recorded in
 [`CHANGELOG.md`](./CHANGELOG.md). Pin the action/package to a release tag
-(`@v0.1.0`) for stability, or track `@main` for the latest.
+(`@v0.2.0`) for stability, or track `@main` for the latest.
 
 ---
 
