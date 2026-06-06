@@ -1,14 +1,23 @@
 /**
- * In-process mock REST server for the dogfood example suite.
+ * In-process mock server for the dogfood example + integration suites.
  *
- * Built on Bun's native `Bun.serve` (no dependency) so the example/builder-live
- * tests exercise *real* HTTP + the full framework while staying hermetic: no
- * external network, deterministic responses, runnable offline. `port: 0` lets the
- * OS assign a free port, so parallel test files never collide.
+ * Built on Bun's native `Bun.serve` (no dependency) so the tests exercise *real*
+ * HTTP + the full framework while staying hermetic: no external network,
+ * deterministic responses, runnable offline. `port: 0` lets the OS assign a free
+ * port, so parallel test files never collide.
  *
- * The surface is a small, realistic REST API (users / posts / todos + a multipart
- * echo) that mirrors the shape of a public placeholder API. Because the suite owns
- * this contract, assertions can be clean and exact rather than defensive.
+ * Two layers live here:
+ *  1. A small, realistic REST API (users / posts / todos + a multipart echo) that
+ *     the example suite asserts on. These shapes are a frozen contract — do not
+ *     change them.
+ *  2. An httpbin-style set of parameterized utility routes (/echo, /status/:code,
+ *     /delay/:ms, /flaky/:key, /retry-after/:key, /redirect/:n, /auth, /login,
+ *     /me, /text, /html, /empty, /malformed-json) so integration tests can drive
+ *     many code paths (retries, redirects, auth, content-types, timeouts...)
+ *     without adding bespoke routes.
+ *
+ * Per-key stateful routes (/flaky, /retry-after) keep their counters in Maps that
+ * are RESET on every startMockServer() call, so each test file gets fresh state.
  */
 
 interface MockUser {
@@ -50,22 +59,96 @@ const posts: MockPost[] = [
 
 const todos: MockTodo[] = [{ id: 1, userId: 1, title: 'delectus aut autem', completed: false }]
 
+// Per-key attempt counters for the stateful utility routes. Reset per server.
+const flakyState = new Map<string, number>()
+const retryAfterState = new Map<string, number>()
+
 /** JSON response with the deterministic content-type + x-powered-by header. */
-function json(body: unknown, status = 200): Response {
+function json(body: unknown, status = 200, extra?: Record<string, string>): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { 'content-type': 'application/json', 'x-powered-by': POWERED_BY },
+    headers: { 'content-type': 'application/json', 'x-powered-by': POWERED_BY, ...extra },
   })
+}
+
+/** Plain-text response with the deterministic x-powered-by header. */
+function text(body: string, status = 200, contentType = 'text/plain', extra?: Record<string, string>): Response {
+  return new Response(body, {
+    status,
+    headers: { 'content-type': contentType, 'x-powered-by': POWERED_BY, ...extra },
+  })
+}
+
+/** Bodyless response (used for 204/205/304 and redirects). */
+function empty(status: number, extra?: Record<string, string>): Response {
+  return new Response(null, { status, headers: { 'x-powered-by': POWERED_BY, ...extra } })
 }
 
 function notFound(): Response {
   return json({ error: 'not found' }, 404)
 }
 
+/** Lowercased header map, for the /echo route's deterministic shape. */
+function headersToObject(req: Request): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [k, v] of req.headers.entries()) out[k.toLowerCase()] = v
+  return out
+}
+
+/** searchParams → plain object (last value wins on repeats). */
+function queryToObject(url: URL): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [k, v] of url.searchParams.entries()) out[k] = v
+  return out
+}
+
+/** Parse the cookie header into a name→value map. */
+function parseCookies(req: Request): Record<string, string> {
+  const out: Record<string, string> = {}
+  const raw = req.headers.get('cookie')
+  if (!raw) return out
+  for (const part of raw.split(';')) {
+    const i = part.indexOf('=')
+    if (i === -1) continue
+    out[part.slice(0, i).trim()] = part.slice(i + 1).trim()
+  }
+  return out
+}
+
+/** Body for /echo: shaped by content-type (JSON / urlencoded / multipart / raw). */
+async function echoBody(req: Request): Promise<unknown> {
+  const ct = req.headers.get('content-type') ?? ''
+  if (ct.includes('application/json')) return req.json().catch(() => null)
+  if (ct.includes('application/x-www-form-urlencoded')) {
+    const params = new URLSearchParams(await req.text())
+    return Object.fromEntries(params.entries())
+  }
+  if (ct.includes('multipart/form-data')) {
+    const form: Record<string, string> = {}
+    const files: Record<string, { filename: string; size: number; type: string }> = {}
+    const fd = await req.formData()
+    for (const [key, value] of fd.entries()) {
+      if (value instanceof File) {
+        files[key] = {
+          filename: value.name,
+          size: value.size,
+          type: value.type || 'application/octet-stream',
+        }
+      } else {
+        form[key] = String(value)
+      }
+    }
+    return { form, files }
+  }
+  return req.text()
+}
+
 async function handle(req: Request): Promise<Response> {
   const url = new URL(req.url)
   const path = url.pathname
   const method = req.method
+
+  // ─── Existing REST API (frozen contract) ──────────────────────────────────
 
   // GET /users/:id → a single user.
   let m = path.match(/^\/users\/(\d+)$/)
@@ -140,10 +223,100 @@ async function handle(req: Request): Promise<Response> {
     return json({ headers: { 'content-type': contentType }, form, files })
   }
 
+  // ─── httpbin-style utility routes ─────────────────────────────────────────
+
+  // ANY /echo → reflect the request (method, path, query, headers, body).
+  if (path === '/echo') {
+    return json({
+      method,
+      path,
+      query: queryToObject(url),
+      headers: headersToObject(req),
+      body: await echoBody(req),
+    })
+  }
+
+  // ANY /status/:code → respond with that status. ?type=text → text/plain body.
+  m = path.match(/^\/status\/(\d+)$/)
+  if (m) {
+    const code = Number(m[1])
+    if (url.searchParams.get('type') === 'text') return text(`status ${code}`, code)
+    if (code === 204 || code === 205 || code === 304) return empty(code)
+    return json({ code }, code)
+  }
+
+  // GET /delay/:ms → wait (capped at 3000) then 200.
+  m = path.match(/^\/delay\/(\d+)$/)
+  if (m && method === 'GET') {
+    const ms = Math.min(Number(m[1]), 3000)
+    await Bun.sleep(ms)
+    return json({ delayed: ms })
+  }
+
+  // GET /flaky/:key → first N calls fail with ?status=S, then 200. x-attempt header.
+  m = path.match(/^\/flaky\/([^/]+)$/)
+  if (m && method === 'GET') {
+    const key = decodeURIComponent(m[1])
+    const fails = Number(url.searchParams.get('fails') ?? '1')
+    const status = Number(url.searchParams.get('status') ?? '503')
+    const attempt = (flakyState.get(key) ?? 0) + 1
+    flakyState.set(key, attempt)
+    const hdr = { 'x-attempt': String(attempt) }
+    return attempt <= fails ? json({ error: 'flaky', attempt }, status, hdr) : json({ ok: true }, 200, hdr)
+  }
+
+  // GET /retry-after/:key → first N calls 429 w/ Retry-After, then 200. x-attempt.
+  m = path.match(/^\/retry-after\/([^/]+)$/)
+  if (m && method === 'GET') {
+    const key = decodeURIComponent(m[1])
+    const fails = Number(url.searchParams.get('fails') ?? '1')
+    const seconds = url.searchParams.get('seconds') ?? '0'
+    const attempt = (retryAfterState.get(key) ?? 0) + 1
+    retryAfterState.set(key, attempt)
+    const hdr = { 'x-attempt': String(attempt) }
+    return attempt <= fails
+      ? json({ error: 'rate limited', attempt }, 429, { ...hdr, 'retry-after': seconds })
+      : json({ ok: true }, 200, hdr)
+  }
+
+  // GET /redirect/:n → 302 chain down to /redirect/0 → 200 { landed: true }.
+  m = path.match(/^\/redirect\/(\d+)$/)
+  if (m && method === 'GET') {
+    const n = Number(m[1])
+    if (n > 0) return empty(302, { location: `/redirect/${n - 1}` })
+    return json({ landed: true })
+  }
+
+  // GET /auth → 200 if Authorization OR X-Signature present, else 401.
+  if (path === '/auth' && method === 'GET') {
+    const authed = req.headers.has('authorization') || req.headers.has('x-signature')
+    return authed ? json({ authed: true }) : json({ error: 'unauthorized' }, 401)
+  }
+
+  // POST /login → set a session cookie. GET /me → requires that cookie.
+  if (path === '/login' && method === 'POST') {
+    return json({ ok: true }, 200, { 'set-cookie': 'session=abc123; Path=/' })
+  }
+  if (path === '/me' && method === 'GET') {
+    return parseCookies(req).session ? json({ user: 'ada' }) : json({ error: 'unauthorized' }, 401)
+  }
+
+  // Content-type fixtures.
+  if (path === '/text' && method === 'GET') return text('hello world')
+  if (path === '/html' && method === 'GET')
+    return text('<html><body><h1>hi</h1></body></html>', 200, 'text/html')
+  if (path === '/empty' && method === 'GET') return empty(204)
+  if (path === '/malformed-json' && method === 'GET')
+    return text('{ not valid json', 200, 'application/json')
+
   return notFound()
 }
 
 export function startMockServer(): { url: string; stop(): void } {
+  // Fresh per-key state for each server instance (i.e. each test file).
+  flakyState.clear()
+  retryAfterState.clear()
+
   const server = Bun.serve({
     port: 0, // OS-assigned free port — safe under parallel test files.
     fetch: handle,
