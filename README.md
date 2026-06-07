@@ -714,7 +714,26 @@ API may change in a minor release; changes are recorded in
 
 ## Roadmap / deferred
 
-Out of MVP scope, designed not to be precluded:
+Ideas not yet built, designed not to be precluded.
+
+Likely next:
+
+- **Polling / `until` helper** — poll an endpoint until a condition holds (interval
+  + timeout), for async or eventually-consistent APIs. `.retry()` only re-sends a
+  single request; this waits for state to change.
+- **JSONPath assertions + extraction** — `.expectJsonPath('$.items[0].id', 1)` and
+  pulling a nested value out for chaining instead of hand-indexing the body.
+- **Auth providers** — built-in OAuth2 client-credentials (with token caching) and
+  an AWS SigV4 signer, composing with header callables / `beforeRequest`.
+- **More assertions** — `.expectJsonLength`, `.expectHeaderAbsent`, array
+  membership, and a GraphQL helper (`.graphql(query, vars)`).
+- **Richer reporting** — an HTML report and/or a first-party PR comment, beyond the
+  current inline annotations + job summary.
+- **Snapshot assertions** — compare a response to a stored snapshot with
+  volatile-field redaction.
+- **Concurrency / rate-limit cap** — throttle requests against a shared real server.
+
+Longer-term / situational:
 
 - **Standalone compiled binary** (`bun build --compile`) — a true install-nothing
   artifact; needs a small homegrown test collector (Bun's runner isn't an
@@ -723,7 +742,6 @@ Out of MVP scope, designed not to be precluded:
   source; a compiled `dist/` is only needed for non-TS publishers.
 - **Named variable store** / declarative format.
 - **Native per-language SDKs** (Java/Go/etc.) — only if an org forces it.
-- **Registry publishing** — once the API stabilizes.
 
 ## License
 
