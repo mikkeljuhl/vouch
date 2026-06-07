@@ -1,5 +1,5 @@
 /**
- * Proxy forwarding (DESIGN.md §4). The `proxy` client option and the per-request
+ * Proxy forwarding. The `proxy` client option and the per-request
  * `.proxy()` builder method are forwarded to Bun's `fetch` as its `proxy` init
  * field. fetch is stubbed via the shared helper (auto-restored) so nothing leaks
  * into the live suite.

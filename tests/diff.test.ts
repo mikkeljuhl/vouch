@@ -1,5 +1,5 @@
 /**
- * Unit coverage for the structured, path-level JSON diff (DESIGN.md §5). We call
+ * Unit coverage for the structured, path-level JSON diff. We call
  * `assertJson`/`assertJsonStrict` directly with a fake `AssertContext` and assert
  * on the thrown `AssertionError.message`, plus an agreement check proving the diff
  * walker's pass/fail verdict matches the existing `isSubset`/`deepEqual` booleans

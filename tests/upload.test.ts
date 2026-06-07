@@ -1,5 +1,5 @@
 /**
- * Mocked, deterministic tests for the file/body upload surface (DESIGN.md §4):
+ * Mocked, deterministic tests for the file/body upload surface:
  * `.body()`, `.form()`, `.multipart()`, `.file()`, the auto-content-type switch,
  * the ReadableStream+retry guard, and the `fixture()` helper. fetch is stubbed
  * via the shared helper (auto-restored) so nothing leaks into the live suite.

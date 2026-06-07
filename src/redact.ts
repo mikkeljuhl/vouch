@@ -1,5 +1,5 @@
 /**
- * Secret redaction (DESIGN.md §4/§8). Two leak surfaces are protected:
+ * Secret redaction. Two leak surfaces are protected:
  *
  *  1. **Debug dumps** (see `./builder` dump): sensitive *header* values are
  *     masked, and configured `bodyKeys` are masked in JSON request/response

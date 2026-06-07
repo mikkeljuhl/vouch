@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// Thin CLI wrapper around `bun test` (DESIGN.md M5). Requires Bun on PATH; the
+// Thin CLI wrapper around `bun test`. Requires Bun on PATH; the
 // install-nothing path is the Docker image. Pure passthrough, plus two
 // conveniences: `--junit <file>` expands to Bun's JUnit reporter flags, and
 // `--typecheck` runs an opt-in `tsc --noEmit` pass over the consumer's tests.
@@ -15,8 +15,8 @@
 // is its own tsc pass. It is OPT-IN: a plain `vouch <file>` still runs a test
 // with type errors (type-stripped) — `--typecheck` is the only thing that gates.
 //
-// A standalone, install-nothing binary (`bun build --compile`) is deferred — see
-// DESIGN.md §9 (Bun's test runner isn't an embeddable API).
+// A standalone, install-nothing binary (`bun build --compile`) is deferred
+// (Bun's test runner isn't an embeddable API).
 
 import { VERSION } from '../src/index'
 
