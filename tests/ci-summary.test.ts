@@ -1,6 +1,6 @@
 /**
- * Unit coverage for the CI reporting helpers in `scripts/ci-summary.mjs`
- * (DESIGN.md §8). The script captures Bun's console output (which contains the
+ * Unit coverage for the CI reporting helpers in `scripts/ci-summary.mjs`.
+ * The script captures Bun's console output (which contains the
  * full assertion message) and MERGES it into the JUnit `<failure>` elements,
  * because Bun's JUnit reporter emits only the error `type` and no message.
  *

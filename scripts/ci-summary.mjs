@@ -1,7 +1,7 @@
 // Renders CI reporting from a JUnit XML report (as emitted by `bun test
 // --reporter=junit --reporter-outfile=...`). First-party, dependency-free.
 //
-// Two surfaces, both built-in/first-party (DESIGN.md §1/§8):
+// Two surfaces, both built-in/first-party:
 //   1. Inline annotations — prints `::error file=…,line=…::msg` workflow
 //      commands for each failing test (Bun doesn't emit these itself).
 //   2. Job summary — a Markdown table appended to $GITHUB_STEP_SUMMARY

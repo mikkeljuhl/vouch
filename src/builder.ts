@@ -1,12 +1,12 @@
 /**
- * Fluent `RequestBuilder` — the authoring surface of the framework (DESIGN.md
- * §3/§4). A builder is constructed by the client's `get`/`post`/etc. methods,
+ * Fluent `RequestBuilder` — the authoring surface of the framework. A builder
+ * is constructed by the client's `get`/`post`/etc. methods,
  * configured via chainable methods, and is itself **awaitable**: awaiting it
  * performs the request once, then runs the queued assertions fail-fast and
  * resolves to a typed `ApiResponse<T>`.
  *
  * Assertions delegate to the engine-agnostic matchers in `./assert`, which throw
- * a clear `AssertionError` on mismatch (DESIGN.md §5). Because a matcher throws
+ * a clear `AssertionError` on mismatch. Because a matcher throws
  * on the first failure and assertions run in declared order, fail-fast falls out
  * for free — the first failing assertion's throw rejects the awaited builder and
  * no later assertion runs. The core imports no test library.
@@ -34,7 +34,7 @@ import type {
 } from './client'
 import { redactHeaders, redactBodyText } from './redact'
 
-/** The typed response object an awaited builder resolves to (DESIGN.md §3). */
+/** The typed response object an awaited builder resolves to. */
 export interface ApiResponse<T> {
   /** HTTP status code. */
   status: number
@@ -182,7 +182,7 @@ async function parseBody<T>(res: Response): Promise<{ body: T; text: string }> {
  *   response is retried iff `when(res)` returns true (no 5xx/429 hardcoding).
  * - Without a predicate, the default policy retries **5xx and 429** (Too Many
  *   Requests) responses only, never other 2xx/3xx/4xx — so a real 4xx is never
- *   masked (DESIGN.md §8). Retry is opt-in (`times > 0`), and an exhausted 429
+ *   masked. Retry is opt-in (`times > 0`), and an exhausted 429
  *   still surfaces to assertions.
  */
 function shouldRetryResponse(res: Response, when?: (res: Response) => boolean): boolean {
@@ -288,7 +288,7 @@ interface DebugResponseInfo {
 }
 
 /**
- * Build the readable request + response diagnostics block (DESIGN.md §4).
+ * Build the readable request + response diagnostics block.
  * Sensitive header values are masked and `bodyKeys` are masked in JSON bodies.
  * Returns the full string (caller writes it to stderr).
  */

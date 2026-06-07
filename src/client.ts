@@ -1,7 +1,6 @@
 /**
  * Client factory: base-URL joining, per-request header resolution, and carried
- * defaults (timeout/retry). This is the configuration surface of the framework —
- * see DESIGN.md §4.
+ * defaults (timeout/retry). This is the configuration surface of the framework.
  *
  * Phase 2 builds the fluent `RequestBuilder` on top of the low-level `_request`
  * seam exposed here; this module intentionally stays thin.
@@ -11,7 +10,7 @@ import { createRequestBuilder, type RequestBuilder } from './builder'
 import type { RedactOptions } from './redact'
 
 /**
- * Failure-diagnostics mode (DESIGN.md §4). `true` is an alias for `'onFailure'`.
+ * Failure-diagnostics mode. `true` is an alias for `'onFailure'`.
  * - `'onFailure'` — dump the request/response only when an assertion throws.
  * - `'always'`    — dump every request after it completes.
  * Default is off (no dump). May also be enabled via the `VOUCH_DEBUG` env var.
@@ -110,7 +109,7 @@ export interface ClientOptions {
    */
   beforeRequest?: (req: OutgoingRequest) => void | Promise<void>
   /**
-   * Failure diagnostics (DESIGN.md §4). When enabled, a compact request +
+   * Failure diagnostics. When enabled, a compact request +
    * response block is written to **stderr**. `true` ⇒ `'onFailure'`. Off by
    * default. The `VOUCH_DEBUG` env var (truthy) also enables it
    * (`VOUCH_DEBUG=always` ⇒ `'always'`, otherwise `'onFailure'`); a per-request
@@ -118,7 +117,7 @@ export interface ClientOptions {
    */
   debug?: DebugMode
   /**
-   * Secret redaction (DESIGN.md §4/§8). Sensitive header values are always
+   * Secret redaction. Sensitive header values are always
    * masked in debug dumps (built-in defaults merged with `redact.headers`).
    * `redact.bodyKeys` lists JSON property names whose values are masked both in
    * debug bodies and in assertion diffs (and thus in JUnit / annotations).

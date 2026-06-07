@@ -1,5 +1,5 @@
 /**
- * Engine-agnostic assertion layer (DESIGN.md §5). This module imports **no** test
+ * Engine-agnostic assertion layer. This module imports **no** test
  * library — matchers simply throw an `AssertionError` on mismatch, and because
  * every test runner treats a thrown error as a failing test, the same suite runs
  * under Bun, Vitest, or `node --test`.
@@ -24,7 +24,7 @@ export interface AssertContext {
   /**
    * JSON property names whose values must be masked (`"***"`) in a structured
    * diff, so a redacted field never leaks through the console / JUnit /
-   * annotations (DESIGN.md §4/§8). Threaded from the client's `redact.bodyKeys`.
+   * annotations. Threaded from the client's `redact.bodyKeys`.
    */
   redactKeys?: string[]
 }

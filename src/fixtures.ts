@@ -1,7 +1,6 @@
 /**
- * Test-fixture helper for file-upload tests (DESIGN.md §4 "File uploads &
- * fixtures"). Bun-native: uses `Bun.file`, never a test library, so it is safe to
- * ship from the framework core.
+ * Test-fixture helper for file-upload tests. Bun-native: uses `Bun.file`,
+ * never a test library, so it is safe to ship from the framework core.
  */
 
 /**

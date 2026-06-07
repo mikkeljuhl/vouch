@@ -1,5 +1,5 @@
 # Portable test runner: Bun + the framework preinstalled, so teams without a JS
-# toolchain can run API tests with one `docker run`. (DESIGN.md §1/§3.)
+# toolchain can run API tests with one `docker run`.
 #
 # Self-test (default):
 #   docker build -t vouch .
