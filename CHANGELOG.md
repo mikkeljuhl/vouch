@@ -62,7 +62,7 @@ fluent builder, distributed as a library, Docker image, CLI, and GitHub Action.
 - **Sessions & signing** — opt-in cookie jar (`cookies: true`) and a `beforeRequest(req)` hook (request signing, correlation IDs).
 - **File uploads** — multipart/form/raw bodies and a `fixture(import.meta.url, path)` helper.
 - **Diagnostics & redaction** — `debug` dumps (`'onFailure'`/`'always'`/`.debug()`/`VOUCH_DEBUG`) and `redact` (sensitive headers + `bodyKeys`) that mask secrets in dumps **and** assertion diffs (and therefore in CI reporting).
-- **Runtimes & distribution** — runs under Bun (default), Vitest, or `node --test`; ships TypeScript source plus generated `.d.ts`. Docker runner image, `vouch` CLI (`--junit`, `--typecheck`/`--typecheck-only`, `--version`), and a composite GitHub Action.
+- **Runtimes & distribution** — Bun runner; ships TypeScript source plus generated `.d.ts`. Docker runner image, `vouch` CLI (`--junit`, `--typecheck`/`--typecheck-only`, `--version`), and a GitHub Action.
 - **Reporting** — JUnit via Bun, enriched with failure messages (Bun's JUnit omits them) by `scripts/ci-summary.mjs`, which also emits inline annotations + a job-summary table.
 
 [Unreleased]: https://github.com/mikkeljuhl/vouch/compare/v0.3.2...HEAD
