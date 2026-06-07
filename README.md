@@ -9,8 +9,7 @@ ours to control). There is no config file and no environment magic: the
 `createClient` factory call *is* the configuration, and it hits real HTTP
 endpoints over the native `fetch`.
 
-See [`docs/USAGE.md`](./docs/USAGE.md) for the usage guide, and
-[`DESIGN.md`](./DESIGN.md) for the design and rationale.
+See [`docs/USAGE.md`](./docs/USAGE.md) for the usage guide.
 
 ---
 
@@ -715,7 +714,7 @@ API may change in a minor release; changes are recorded in
 
 ## Roadmap / deferred
 
-Out of MVP scope, designed not to be precluded (see [`DESIGN.md`](./DESIGN.md) §10):
+Out of MVP scope, designed not to be precluded:
 
 - **Standalone compiled binary** (`bun build --compile`) — a true install-nothing
   artifact; needs a small homegrown test collector (Bun's runner isn't an
