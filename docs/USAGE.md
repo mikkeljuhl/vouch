@@ -163,14 +163,14 @@ A container can't reach the host's `localhost`, so use `host.docker.internal`:
 docker run --rm -v "$PWD/tests:/app/tests" \
   --add-host=host.docker.internal:host-gateway \
   -e API_BASE_URL=http://host.docker.internal:8080 \
-  ghcr.io/mikkeljuhl/vouch:0.3.1
+  ghcr.io/mikkeljuhl/vouch:0.3.2
 ```
 
 CI. The action runs the runner image (same `Dockerfile` as `docker run`), runs the tests, then emits annotations and a summary. Linux runners only; type-checking is a separate native step.
 
 ```yaml
 - uses: actions/checkout@v5
-- uses: mikkeljuhl/vouch@v0.3.1
+- uses: mikkeljuhl/vouch@v0.3.2
   with:
     junit-file: reports/junit.xml   # optional; paths: defaults to all tests
 ```

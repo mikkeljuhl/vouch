@@ -1,6 +1,6 @@
 {
   "name": "@mikkeljuhl/vouch",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "license": "MIT",
   "description": "Code-authored API test framework for Bun: a fluent builder that sends real requests and asserts on responses.",
   "author": "Mikkel Juhl",

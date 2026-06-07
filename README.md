@@ -67,13 +67,13 @@ The image is published to GitHub Container Registry on each release:
 
 ```sh
 # Run YOUR tests by mounting them over /app/tests:
-docker run --rm -v "$PWD/tests:/app/tests" ghcr.io/mikkeljuhl/vouch:0.3.1
+docker run --rm -v "$PWD/tests:/app/tests" ghcr.io/mikkeljuhl/vouch:0.3.2
 
 # Emit JUnit to the host:
 docker run --rm \
   -v "$PWD/tests:/app/tests" \
   -v "$PWD/reports:/app/reports" \
-  ghcr.io/mikkeljuhl/vouch:0.3.1 --reporter=junit --reporter-outfile=/app/reports/junit.xml
+  ghcr.io/mikkeljuhl/vouch:0.3.2 --reporter=junit --reporter-outfile=/app/reports/junit.xml
 ```
 
 Or build it yourself from the `Dockerfile` (`docker build -t vouch .`); `docker run --rm vouch` self-tests the baked dogfood suite.
@@ -85,7 +85,7 @@ To hit a service running on the host, a container can't reach the host's
 docker run --rm -v "$PWD/tests:/app/tests" \
   --add-host=host.docker.internal:host-gateway \
   -e API_BASE_URL=http://host.docker.internal:8080 \
-  ghcr.io/mikkeljuhl/vouch:0.3.1
+  ghcr.io/mikkeljuhl/vouch:0.3.2
 ```
 
 For the day-to-day local loop, prefer Bun (above) — `localhost` works directly
@@ -106,7 +106,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v5
-      - uses: mikkeljuhl/vouch@v0.3.1    # pin a release tag (or @main for latest)
+      - uses: mikkeljuhl/vouch@v0.3.2    # pin a release tag (or @main for latest)
         with:
           paths: tests                   # optional; default = all discovered tests
           junit-file: reports/junit.xml  # optional
@@ -708,7 +708,7 @@ Semantic Versioning. The version in `package.json` is the single source of truth
 the `VERSION` export and `vouch --version` both read it. While on `0.x` the public
 API may change in a minor release; changes are recorded in
 [`CHANGELOG.md`](./CHANGELOG.md). Pin the action/package to a release tag
-(`@v0.3.1`) for stability, or track `@main` for the latest.
+(`@v0.3.2`) for stability, or track `@main` for the latest.
 
 ---
 

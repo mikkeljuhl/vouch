@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _Nothing yet._
 
+## [0.3.2] - 2026-06-07
+
+### Fixed
+- Importing `@mikkeljuhl/vouch` is now safe on any runtime. `src/index.ts` read `VERSION` via top-level-await `Bun.file(...).json()` (a Bun-only API), which crashed the import outside Bun — undercutting the runner-agnostic core. `VERSION` is now a generated static constant (`scripts/gen-version.mjs` -> `src/version.ts`, run in `prepare`), the debug dump uses `console.error`, and `VOUCH_DEBUG` is read via `globalThis.process?.env?` (no assumed `process` global).
+- Dockerfile copies `scripts/` before `bun install` so the new `prepare` (gen-version) succeeds during the image build.
+
 ## [0.3.1] - 2026-06-06
 
 ### Added
@@ -59,7 +65,8 @@ fluent builder, distributed as a library, Docker image, CLI, and GitHub Action.
 - **Runtimes & distribution** — runs under Bun (default), Vitest, or `node --test`; ships TypeScript source plus generated `.d.ts`. Docker runner image, `vouch` CLI (`--junit`, `--typecheck`/`--typecheck-only`, `--version`), and a composite GitHub Action.
 - **Reporting** — JUnit via Bun, enriched with failure messages (Bun's JUnit omits them) by `scripts/ci-summary.mjs`, which also emits inline annotations + a job-summary table.
 
-[Unreleased]: https://github.com/mikkeljuhl/vouch/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/mikkeljuhl/vouch/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/mikkeljuhl/vouch/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/mikkeljuhl/vouch/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/mikkeljuhl/vouch/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/mikkeljuhl/vouch/compare/v0.1.0...v0.2.0
@@ -70,7 +77,7 @@ fluent builder, distributed as a library, Docker image, CLI, and GitHub Action.
 ## Releasing
 
 1. Move everything under **[Unreleased]** into a new `## [X.Y.Z] - YYYY-MM-DD` section (keep an empty Unreleased).
-2. Bump `version` in `package.json` (it's the single source of truth — `VERSION` and `vouch --version` read it).
+2. Bump `version` in `package.json` (the single source of truth), then run `bun run gen:version` to regenerate `src/version.ts` (also runs in `prepare`). `VERSION` and `vouch --version` come from it.
 3. Update the compare/tag links at the bottom.
 4. Commit, then tag: `git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z`.
 5. Pin docs/consumers to the tag (`uses: mikkeljuhl/vouch@vX.Y.Z`).
