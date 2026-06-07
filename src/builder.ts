@@ -630,7 +630,9 @@ export function createRequestBuilder<T>(
     const dump = (res: DebugResponseInfo | undefined): void => {
       if (!lastSent) return
       const block = formatDebugDump(lastSent, res, client.redact)
-      process.stderr.write(`${block}\n`)
+      // `console.error` writes to stderr on every runtime (Bun/Node/Deno/edge),
+      // unlike `process.stderr`, which is absent outside Node-likes.
+      console.error(block)
     }
 
     // Measure the wall-clock time of the request. With retry enabled this spans

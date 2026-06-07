@@ -331,7 +331,9 @@ function serializeCookieHeader(jar: Map<string, string>): string | undefined {
  */
 export function resolveDebugMode(
   option: DebugMode | undefined,
-  env: string | undefined = process.env.VOUCH_DEBUG,
+  // Read via `globalThis.process?.` so the import doesn't assume a `process`
+  // global — absent on edge/worker runtimes; present on Bun/Node/Deno.
+  env: string | undefined = globalThis.process?.env?.VOUCH_DEBUG,
 ): 'onFailure' | 'always' | undefined {
   if (option !== undefined) {
     if (option === false) return undefined

@@ -1,15 +1,11 @@
 /**
- * The package version — read from package.json at import time so it is the single
- * source of truth (never drifts from the manifest). Resolved relative to this
- * module, so it works whether running from source (Bun) or as an installed dep.
- *
- * Uses a top-level `await` over `Bun.file(...).json()` (Bun-native; the framework
- * targets Bun as its only runtime). Top-level await is valid in Bun ESM and under
- * tsc with `module: ESNext`.
+ * The package version. Re-exported from the generated `./version` module, which
+ * `scripts/gen-version.mjs` writes from package.json (the single source of truth)
+ * during `prepare`. This keeps `VERSION` a plain static constant — no top-level
+ * `await`, no `Bun.file` read — so importing the package never crashes on a
+ * non-Bun runtime, and the runner-agnostic assertion layer is importable anywhere.
  */
-export const VERSION: string = (
-  await Bun.file(new URL('../package.json', import.meta.url)).json()
-).version
+export { VERSION } from './version'
 
 export { createClient, DEFAULT_TIMEOUT_MS, resolveDebugMode } from './client'
 export type {

@@ -5,28 +5,27 @@ import { installMockFetch, jsonResponse } from './support/mock-fetch'
 /**
  * Failure-diagnostics (debug dump) behaviour. The shared mock-fetch helper stubs
  * `globalThis.fetch` (auto-restored); stderr is captured by spying on
- * `process.stderr.write`, restored in `afterEach`. The dump reflects the ACTUAL
- * request sent (final headers incl. cookies + beforeRequest mutations) and
- * redacts sensitive headers.
+ * `console.error` (the dump's portable stderr sink), restored in `afterEach`.
+ * The dump reflects the ACTUAL request sent (final headers incl. cookies +
+ * beforeRequest mutations) and redacts sensitive headers.
  */
 describe('debug diagnostics', () => {
   const fetch = installMockFetch()
-  const realStderrWrite = process.stderr.write.bind(process.stderr)
+  const realConsoleError = console.error
 
   let captured: string
 
   afterEach(() => {
-    process.stderr.write = realStderrWrite
+    console.error = realConsoleError
     delete process.env.VOUCH_DEBUG
   })
 
-  /** Spy on stderr, accumulating everything written into `captured`. */
+  /** Spy on the dump sink (`console.error`), accumulating every block into `captured`. */
   function spyStderr() {
     captured = ''
-    process.stderr.write = ((chunk: string | Uint8Array) => {
-      captured += typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString()
-      return true
-    }) as typeof process.stderr.write
+    console.error = ((...args: unknown[]) => {
+      captured += `${args.map(String).join(' ')}\n`
+    }) as typeof console.error
   }
 
   test("debug: 'always' dumps on a passing request", async () => {
