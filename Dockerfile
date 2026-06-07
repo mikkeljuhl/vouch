@@ -26,6 +26,8 @@ WORKDIR /app
 # not needed at runtime, but emitting it keeps `prepare` honest in the image.
 COPY package.json bun.lock tsconfig.json tsconfig.build.json ./
 COPY src ./src
+# scripts/ must be present before install: `prepare` runs scripts/gen-version.mjs.
+COPY scripts ./scripts
 RUN bun install --frozen-lockfile
 
 # Make the package importable by its published name for mounted user tests:
@@ -33,9 +35,8 @@ RUN bun install --frozen-lockfile
 # (which points at ./src/index.ts — Bun runs the TS source directly).
 RUN mkdir -p node_modules/@mikkeljuhl && ln -sf /app node_modules/@mikkeljuhl/vouch
 
-# Bake the dogfood suite + reporting script so `docker run` self-tests by default.
+# Bake the dogfood suite so `docker run` self-tests by default.
 COPY tests ./tests
-COPY scripts ./scripts
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN chmod +x /app/docker-entrypoint.sh
 
