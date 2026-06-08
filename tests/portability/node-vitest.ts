@@ -9,6 +9,11 @@
  * `Set-Cookie` parsing via `getSetCookie`, multipart `FormData` upload). The
  * full assertion/diff/redaction coverage lives in the bun:test suite — we are
  * not duplicating it here.
+ *
+ * Filename ends `-vitest.ts` (not `.test.ts`) so `bun test`'s default
+ * discovery skips it — the Docker image / GitHub Action runs `bun test` over
+ * the workspace and has no `dist/` to import. `vitest.config.ts` includes
+ * this pattern explicitly.
  */
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
