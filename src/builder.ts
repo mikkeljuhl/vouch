@@ -23,7 +23,7 @@ import {
   assertUnder,
   type AssertContext,
   type SchemaInput,
-} from './assert'
+} from './assert.js'
 import type {
   Client,
   HeaderValue,
@@ -31,8 +31,8 @@ import type {
   RetryOptions,
   RequestOptions,
   OutgoingRequest,
-} from './client'
-import { redactHeaders, redactBodyText } from './redact'
+} from './client.js'
+import { redactHeaders, redactBodyText } from './redact.js'
 
 /** The typed response object an awaited builder resolves to. */
 export interface ApiResponse<T> {

@@ -1,16 +1,17 @@
 {
-  // Declaration-only build (DESIGN.md §7). Bun runs the TS source directly, so
-  // there is NO runtime build — this emits ONLY `.d.ts` for consumers' tsc/IDE,
-  // so they resolve our types without dragging our raw `src/*.ts` into their
-  // program (skipLibCheck doesn't skip `.ts`). Generated into `dist/` (gitignored).
+  // Dual emit (JS + .d.ts) into `dist/` for Node consumers (the `default` export
+  // condition points here). Bun still imports `src/*.ts` directly via the `bun`
+  // export condition, so no runtime build is needed for Bun. Source imports use
+  // `.js` extensions so the emitted JS is a valid Node ESM module graph;
+  // TypeScript resolves the `.js` specifiers to their `.ts` siblings at compile
+  // time, and Bun does the same at runtime.
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": false,
     "declaration": true,
-    "emitDeclarationOnly": true,
     "outDir": "dist",
     "rootDir": "src"
   },
-  // Lib only — never emit declarations for tests or the CLI.
+  // Lib only — never emit JS/declarations for tests or the CLI.
   "include": ["src"]
 }

@@ -5,9 +5,9 @@
  * `await`, no `Bun.file` read — so importing the package never crashes on a
  * non-Bun runtime, and the runner-agnostic assertion layer is importable anywhere.
  */
-export { VERSION } from './version'
+export { VERSION } from './version.js'
 
-export { createClient, DEFAULT_TIMEOUT_MS, resolveDebugMode } from './client'
+export { createClient, DEFAULT_TIMEOUT_MS, resolveDebugMode } from './client.js'
 export type {
   Client,
   ClientOptions,
@@ -18,17 +18,17 @@ export type {
   OutgoingRequest,
   CookieJar,
   DebugMode,
-} from './client'
-export { computeRetryDelay, parseRetryAfter, formatDebugDump } from './builder'
-export type { RequestBuilder, ApiResponse } from './builder'
-export { AssertionError } from './assert'
-export type { AssertContext, SchemaInput, StandardSchemaV1 } from './assert'
-export { fixture } from './fixtures'
+} from './client.js'
+export { computeRetryDelay, parseRetryAfter, formatDebugDump } from './builder.js'
+export type { RequestBuilder, ApiResponse } from './builder.js'
+export { AssertionError } from './assert.js'
+export type { AssertContext, SchemaInput, StandardSchemaV1 } from './assert.js'
+export { fixture } from './fixtures.js'
 export {
   redactHeaders,
   redactBodyKeys,
   redactBodyText,
   DEFAULT_SENSITIVE_HEADERS,
   REDACTION_MASK,
-} from './redact'
-export type { RedactOptions } from './redact'
+} from './redact.js'
+export type { RedactOptions } from './redact.js'

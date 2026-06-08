@@ -6,8 +6,8 @@
  * seam exposed here; this module intentionally stays thin.
  */
 
-import { createRequestBuilder, type RequestBuilder } from './builder'
-import type { RedactOptions } from './redact'
+import { createRequestBuilder, type RequestBuilder } from './builder.js'
+import type { RedactOptions } from './redact.js'
 
 /**
  * Failure-diagnostics mode. `true` is an alias for `'onFailure'`.
@@ -127,9 +127,13 @@ export interface ClientOptions {
    * Route every request through an HTTP/HTTPS/SOCKS proxy (forwarded to Bun's
    * `fetch` as its `proxy` option). Overridable per request via `.proxy(url)`.
    *
-   * This is the explicit/programmatic form: on Bun the `HTTP_PROXY` /
-   * `HTTPS_PROXY` / `NO_PROXY` env vars already route `fetch` automatically, so
-   * set this only when you need to choose a proxy in code.
+   * **Bun-only.** Node's `fetch` (undici) does not accept a `proxy` option and
+   * silently ignores this value — on Node, wire `undici`'s `ProxyAgent` outside
+   * the framework if you need a proxy.
+   *
+   * On Bun, `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` env vars already route
+   * `fetch` automatically — set this only when you need to choose a proxy in
+   * code.
    */
   proxy?: string
 }
@@ -144,8 +148,9 @@ export interface RequestOptions {
   timeoutMs?: number
   /**
    * Per-request proxy override (defaults to the client's `proxy`). Forwarded to
-   * Bun's `fetch` as its `proxy` option. Independent of `beforeRequest` (a proxy
-   * is transport, not headers).
+   * Bun's `fetch` as its `proxy` option; ignored on Node (undici does not accept
+   * a `proxy` option). Independent of `beforeRequest` (a proxy is transport,
+   * not headers).
    */
   proxy?: string
   signal?: AbortSignal

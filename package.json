@@ -2,7 +2,7 @@
   "name": "@mikkeljuhl/vouch",
   "version": "0.3.2",
   "license": "MIT",
-  "description": "Code-authored API test framework for Bun: a fluent builder that sends real requests and asserts on responses.",
+  "description": "Code-authored API test framework: a fluent builder that sends real requests and asserts on responses. Runs natively on Bun, and on Node 20+ as a library (e.g. inside vitest).",
   "author": "Mikkel Juhl",
   "repository": {
     "type": "git",
@@ -15,21 +15,25 @@
     "testing",
     "e2e",
     "bun",
+    "node",
+    "vitest",
     "http",
     "fetch"
   ],
   "type": "module",
   "engines": {
-    "bun": ">=1.2.0"
+    "bun": ">=1.2.0",
+    "node": ">=20"
   },
   "sideEffects": false,
-  "module": "./src/index.ts",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "bun": "./src/index.ts",
-      "default": "./src/index.ts"
+      "default": "./dist/index.js"
     },
     "./package.json": "./package.json"
   },
@@ -43,14 +47,16 @@
   },
   "scripts": {
     "test": "bun test",
+    "test:node": "vitest run",
     "test:ci": "bun test --reporter=junit --reporter-outfile=reports/junit.xml",
     "typecheck": "tsc --noEmit",
     "gen:version": "bun scripts/gen-version.mjs",
-    "build:types": "tsc -p tsconfig.build.json",
+    "build": "bun scripts/gen-version.mjs && tsc -p tsconfig.build.json",
     "prepare": "bun scripts/gen-version.mjs && tsc -p tsconfig.build.json"
   },
   "devDependencies": {
     "@types/bun": "^1.3.14",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^2.1.0"
   }
 }

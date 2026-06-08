@@ -10,7 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added
+- **Native Node + vitest support as a library.** `import { createClient, fixture } from '@mikkeljuhl/vouch'` now works directly under Node ≥ 20 (e.g. inside a vitest suite). The package ships compiled JS + `.d.ts` in `dist/` for Node consumers; Bun keeps importing TypeScript source via the `bun` export condition (no behavior change on Bun). `fixture()` runtime-detects: `Bun.file` on Bun, `node:fs` + `Blob` on Node — same sync `Blob`-returning signature. A new `tests/portability/` suite imports the built dist and runs under `vitest run` (`pnpm test:node`) alongside the bun:test dogfood suite. See README → "Use under Node + vitest".
+
+### Changed
+- `package.json` `engines` adds `node: ">=20"`; `exports.default` now points at `./dist/index.js`. The `vouch` CLI, `vouch init` scaffold, GitHub Action, and Docker image remain Bun-only — under Node you drive vitest directly.
+- The `proxy` option on `ClientOptions`/`RequestOptions` is documented as Bun-only (Node's undici `fetch` silently ignores it). No runtime change; docstrings only.
 
 ## [0.3.2] - 2026-06-07
 

@@ -2,12 +2,15 @@
 
 A reusable TypeScript framework for **code-authored, E2E-style API tests** against
 an **already-deployed** server. You create a **client** with a base URL and
-headers, then make fluent, awaitable requests and assert on responses. **Bun is
-the required runtime.** The core imports no test runner — assertions throw a
-plain `AssertionError` (a clean-design choice that keeps the diffs and redaction
-ours to control). There is no config file and no environment magic: the
-`createClient` factory call *is* the configuration, and it hits real HTTP
-endpoints over the native `fetch`.
+headers, then make fluent, awaitable requests and assert on responses. The core
+imports no test runner — assertions throw a plain `AssertionError` (a clean-design
+choice that keeps the diffs and redaction ours to control). There is no config
+file and no environment magic: the `createClient` factory call *is* the
+configuration, and it hits real HTTP endpoints over the native `fetch`.
+
+**First-class on Bun** (with the bundled `vouch` CLI and Docker image), and
+**also runs on Node 20+ as a portable library** — drop it into a vitest suite
+and `import { createClient } from '@mikkeljuhl/vouch'` works directly.
 
 See [`docs/USAGE.md`](./docs/USAGE.md) for the usage guide.
 
@@ -15,21 +18,33 @@ See [`docs/USAGE.md`](./docs/USAGE.md) for the usage guide.
 
 ## Requirements
 
-- **[Bun](https://bun.sh) ≥ 1.2 is required** — the framework targets Bun as its
-  only runtime and uses Bun-native APIs (`Bun.file`, fetch's `proxy` option, …).
-  Install:
+Pick the runtime that fits your project:
+
+- **[Bun](https://bun.sh) ≥ 1.2** — the recommended path. The `vouch` CLI, the
+  GitHub Action, the Docker image, and the `bun:test`-shaped scaffold from
+  `vouch init` all target Bun. Install:
 
   ```sh
   curl -fsSL https://bun.sh/install | bash
   ```
 
-  Bun runs TypeScript natively (no `tsconfig`/build to run a test), and provides
-  the test runner (`bun:test`), `expect`, and `fetch` out of the box.
-- The package ships **TypeScript source** (no build step) — Bun consumes TS
-  directly.
-- The core imports **no test library**: assertions throw a plain `AssertionError`
-  (a clean-design property, so the diffs/redaction are fully ours), and the
-  dogfood suite uses `bun:test`.
+  Bun runs TypeScript natively, provides the test runner (`bun:test`), `expect`,
+  and `fetch` out of the box, and exposes a few extras vouch uses by default
+  (`Bun.file`, fetch's `proxy` option).
+
+- **Node ≥ 20** — supported as a portable library. `import` the framework into a
+  vitest (or `node --test`) suite and use the fluent builder + assertions as-is;
+  see [Use under Node + vitest](#use-under-node--vitest) below. The `proxy`
+  option on `createClient`/`.proxy()` is silently ignored on Node (undici's
+  `fetch` doesn't accept one — wire `undici`'s `ProxyAgent` outside vouch if you
+  need it). Everything else — including `fixture()` for multipart uploads — is
+  runtime-detected and works identically on both.
+
+The core imports **no test library**: assertions throw a plain `AssertionError`
+(a clean-design property, so the diffs/redaction are fully ours). The dogfood
+suite uses `bun:test`; the published package ships built JS + `.d.ts` in `dist/`
+for Node consumers and TypeScript source for Bun consumers via the `bun` export
+condition.
 
 ---
 
@@ -54,6 +69,42 @@ bun test --watch                           # edit-run loop, with editor IntelliS
 bun test tests/users.test.ts               # a single file
 vouch --junit reports/junit.xml            # expands to Bun's JUnit reporter flags
 ```
+
+### Use under Node + vitest
+
+If your repo already runs on Node and you'd rather not introduce Bun for one
+package, vouch works as a portable library — `createClient`, `fixture()`, and
+the assertion layer all use web-standard APIs (`fetch`, `Blob`, `FormData`,
+`AbortSignal`) and are runtime-detected where they need to be (`fixture()` falls
+back to `node:fs` when `Bun` isn't present). The published package ships
+compiled JS in `dist/`, so Node ESM imports work without a transform step.
+
+```sh
+pnpm add -D @mikkeljuhl/vouch vitest    # or npm/yarn equivalent
+```
+
+```ts
+// tests/api.test.ts
+import { beforeAll, describe, test } from 'vitest'
+import { createClient, type Client } from '@mikkeljuhl/vouch'
+
+describe('my api', () => {
+  let client: Client
+  beforeAll(() => {
+    client = createClient({ baseUrl: process.env.API_BASE_URL ?? 'http://localhost:8080' })
+  })
+
+  test('health check', async () => {
+    await client.get('/health').expectStatus(200).expectJson({ ok: true })
+  })
+})
+```
+
+Run it with `vitest run` (or your existing vitest setup). The `vouch` CLI and
+the `vouch init` scaffold are Bun-only — under Node you drive vitest directly
+and use vouch as a library. The `proxy` option on `createClient`/`.proxy()` is
+ignored on Node (Bun-only escape hatch); for proxied requests on Node, wire
+`undici`'s `ProxyAgent` outside vouch.
 
 ### Docker — CI and zero-install one-offs
 
