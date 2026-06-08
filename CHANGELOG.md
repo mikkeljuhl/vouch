@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.4.0] - 2026-06-08
+
 ### Added
 - **Native Node + vitest support as a library.** `import { createClient, fixture } from '@mikkeljuhl/vouch'` now works directly under Node ≥ 20 (e.g. inside a vitest suite). The package ships compiled JS + `.d.ts` in `dist/` for Node consumers; Bun keeps importing TypeScript source via the `bun` export condition (no behavior change on Bun). `fixture()` runtime-detects: `Bun.file` on Bun, `node:fs` + `Blob` on Node — same sync `Blob`-returning signature. A new `tests/portability/` suite imports the built dist and runs under `vitest run` (`pnpm test:node`) alongside the bun:test dogfood suite. See README → "Use under Node + vitest".
 
@@ -70,7 +74,8 @@ fluent builder, distributed as a library, Docker image, CLI, and GitHub Action.
 - **Runtimes & distribution** — Bun runner; ships TypeScript source plus generated `.d.ts`. Docker runner image, `vouch` CLI (`--junit`, `--typecheck`/`--typecheck-only`, `--version`), and a GitHub Action.
 - **Reporting** — JUnit via Bun, enriched with failure messages (Bun's JUnit omits them) by `scripts/ci-summary.mjs`, which also emits inline annotations + a job-summary table.
 
-[Unreleased]: https://github.com/mikkeljuhl/vouch/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/mikkeljuhl/vouch/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/mikkeljuhl/vouch/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/mikkeljuhl/vouch/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/mikkeljuhl/vouch/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/mikkeljuhl/vouch/compare/v0.2.0...v0.3.0
