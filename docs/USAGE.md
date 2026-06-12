@@ -84,6 +84,20 @@ const created = await client
 await client.get<Post>(`/posts/${created.body.id}`).expectStatus(200)
 ```
 
+## Server-sent events
+
+`client.sse(path)` returns an awaitable SSE builder: it opens a `text/event-stream` request (factory headers, cookies, and `beforeRequest` apply as on any request), collects parsed events until `.until(predicate)` / `.take(n)` is satisfied (default: the first event), then cancels the stream and resolves to `{ status, headers, events, durationMs }`. Each event is `{ id?, event, data }` with multi-line `data:` lines joined per the spec; comments/heartbeats and dataless blocks never surface. `.lastEventId(id)` sets the resume cursor; `.timeout(ms)` bounds the wait (default 10s) and throws an `AssertionError` when the condition is not met in time or the stream closes early; `.onOpen(fn)` runs once the stream is open so you can trigger the event you are waiting for without racing the subscription; `.expectStatus`/`.expectHeader` assert on the stream response at open. A non-stream response fails loudly unless an expectation was queued for it (`.expectStatus(401)` makes an auth check pass with zero events).
+
+```ts
+const capture = await client
+  .sse('/v1/stream')
+  .lastEventId('0')
+  .onOpen(() => client.post('/v1/events').json(payload).expectStatus(202).send())
+  .until((events) => events.some((e) => e.data.includes(eventId)))
+
+expect(capture.events.at(-1)?.event).toBe('lifecycle')
+```
+
 ## Examples
 
 Chaining. There is no template store; feed one call's `body` into the next:

@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _Nothing yet._
 
+## [0.5.0] - 2026-06-12
+
+### Added
+- **First-class Server-Sent Events: `client.sse(path)`.** A fluent, awaitable SSE builder that opens a `text/event-stream` request through the same `_request` seam as every other call (factory headers, callable values, cookie jar, `beforeRequest` signing all apply), parses events incrementally (multi-line `data:` joined per the spec; comments/heartbeats and dataless blocks never dispatch), and collects until `.until(predicate)` / `.take(n)` is met (default: the first event) — then cancels the stream so a test never holds a connection open. `.lastEventId(id)` sets the resume cursor, `.timeout(ms)` bounds the wait (default 10s) and fails with an `AssertionError` when the condition is unmet (or the stream closes early), `.onOpen(fn)` runs after the stream opens so the awaited event can be triggered without racing the subscription, and `.expectStatus`/`.expectHeader` assert at open. A non-stream response fails loudly unless an expectation was queued for it. Works identically on Bun and Node (covered in the dogfood suite and the Node portability smoke); the parser is exported as `createSseParser` for ad-hoc use.
+
 ## [0.4.0] - 2026-06-08
 
 ### Added
@@ -75,6 +80,7 @@ fluent builder, distributed as a library, Docker image, CLI, and GitHub Action.
 - **Reporting** — JUnit via Bun, enriched with failure messages (Bun's JUnit omits them) by `scripts/ci-summary.mjs`, which also emits inline annotations + a job-summary table.
 
 [Unreleased]: https://github.com/mikkeljuhl/vouch/compare/v0.4.0...HEAD
+[0.5.0]: https://github.com/mikkeljuhl/vouch/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/mikkeljuhl/vouch/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/mikkeljuhl/vouch/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/mikkeljuhl/vouch/compare/v0.3.0...v0.3.1

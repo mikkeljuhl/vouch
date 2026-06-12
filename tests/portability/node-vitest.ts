@@ -67,6 +67,17 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
     return send(res, 200, echo)
   }
+  if (url.pathname === '/sse') {
+    res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' })
+    res.write(': open\n\n')
+    let i = 0
+    const timer = setInterval(() => {
+      i += 1
+      res.write(`id: ${i}\nevent: tick\ndata: {"i":${i}}\n\n`)
+    }, 10)
+    req.on('close', () => clearInterval(timer))
+    return
+  }
   send(res, 404, { error: 'not found' })
 }
 
@@ -142,6 +153,18 @@ describe('vouch on Node + vitest', () => {
     expect(jarClient.cookies.get('sid')).toBe('abc123')
     const res = await jarClient.get<{ cookie: string }>('/me').expectStatus(200)
     expect(res.body.cookie).toContain('sid=abc123')
+  })
+
+  test('client.sse streams, parses, and cancels under Node (undici fetch)', async () => {
+    const capture = await client
+      .sse('/sse')
+      .expectStatus(200)
+      .expectHeader('content-type', /event-stream/)
+      .take(2)
+    expect(capture.events).toEqual([
+      { id: '1', event: 'tick', data: '{"i":1}' },
+      { id: '2', event: 'tick', data: '{"i":2}' },
+    ])
   })
 
   test('fixture() reads a file as a Blob and uploads via multipart', async () => {

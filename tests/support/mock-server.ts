@@ -14,7 +14,8 @@
  *     /delay/:ms, /flaky/:key, /retry-after/:key, /redirect/:n, /auth, /login,
  *     /me, /text, /html, /empty, /malformed-json) so integration tests can drive
  *     many code paths (retries, redirects, auth, content-types, timeouts...)
- *     without adding bespoke routes.
+ *     without adding bespoke routes, plus /sse/* event-stream routes for the
+ *     SSE builder.
  *
  * Per-key stateful routes (/flaky, /retry-after) keep their counters in Maps that
  * are RESET on every startMockServer() call, so each test file gets fresh state.
@@ -82,6 +83,37 @@ function text(body: string, status = 200, contentType = 'text/plain', extra?: Re
 /** Bodyless response (used for 204/205/304 and redirects). */
 function empty(status: number, extra?: Record<string, string>): Response {
   return new Response(null, { status, headers: { 'x-powered-by': POWERED_BY, ...extra } })
+}
+
+/**
+ * text/event-stream response: enqueue `frames` one by one (5ms apart), then
+ * close when `close` is set, else hold the stream open until the client
+ * cancels. The timer chain stops on cancel so no work leaks past a test.
+ */
+function sse(frames: string[], opts: { close?: boolean } = {}): Response {
+  const encoder = new TextEncoder()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      let i = 0
+      const push = () => {
+        if (i < frames.length) {
+          controller.enqueue(encoder.encode(frames[i]))
+          i += 1
+          timer = setTimeout(push, 5)
+        } else if (opts.close) {
+          controller.close()
+        }
+      }
+      timer = setTimeout(push, 5)
+    },
+    cancel() {
+      clearTimeout(timer)
+    },
+  })
+  return new Response(stream, {
+    headers: { 'content-type': 'text/event-stream', 'x-powered-by': POWERED_BY },
+  })
 }
 
 function notFound(): Response {
@@ -299,6 +331,37 @@ async function handle(req: Request): Promise<Response> {
   }
   if (path === '/me' && method === 'GET') {
     return parseCookies(req).session ? json({ user: 'ada' }) : json({ error: 'unauthorized' }, 401)
+  }
+
+  // ─── SSE routes (text/event-stream) ───────────────────────────────────────
+
+  // GET /sse/ticks?count=N[&close=1] → a comment heartbeat, then N `tick`
+  // events (id: i, data: {"i":i}); holds the stream open unless close=1.
+  if (path === '/sse/ticks' && method === 'GET') {
+    const count = Number(url.searchParams.get('count') ?? '3')
+    const frames = [': heartbeat\n\n']
+    for (let i = 1; i <= count; i++) {
+      frames.push(`id: ${i}\nevent: tick\ndata: {"i":${i}}\n\n`)
+    }
+    return sse(frames, { close: url.searchParams.get('close') === '1' })
+  }
+
+  // GET /sse/echo-last-event-id → one `resume` event whose data is the
+  // received Last-Event-ID header (or "none"); holds open.
+  if (path === '/sse/echo-last-event-id' && method === 'GET') {
+    const lastEventId = req.headers.get('last-event-id') ?? 'none'
+    return sse([`event: resume\ndata: ${lastEventId}\n\n`])
+  }
+
+  // GET /sse/multiline → one event with two data lines + an id, then CLOSE
+  // (exercises spec joining and the stream-closed-before-condition path).
+  if (path === '/sse/multiline' && method === 'GET') {
+    return sse(['id: 9\ndata: line one\ndata: line two\n\n'], { close: true })
+  }
+
+  // GET /sse/silent → comment heartbeats only, never an event (timeout path).
+  if (path === '/sse/silent' && method === 'GET') {
+    return sse([': nothing to see\n\n'])
   }
 
   // Content-type fixtures.

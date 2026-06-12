@@ -8,6 +8,7 @@
 
 import { createRequestBuilder, type RequestBuilder } from './builder.js'
 import type { RedactOptions } from './redact.js'
+import { createSseBuilder, type SseBuilder } from './sse.js'
 
 /**
  * Failure-diagnostics mode. `true` is an alias for `'onFailure'`.
@@ -197,6 +198,15 @@ export interface Client {
   patch<T = unknown>(path: string): RequestBuilder<T>
   /** Begin a DELETE request to `path`; returns a fluent, awaitable builder. */
   delete<T = unknown>(path: string): RequestBuilder<T>
+  /**
+   * Open a Server-Sent Events subscription to `path`; returns a fluent,
+   * awaitable {@link SseBuilder} that collects parsed events until its
+   * `until`/`take` condition is met (default: the first event), then cancels
+   * the stream. Factory headers, cookies, and `beforeRequest` apply as on any
+   * request; the client's request timeout does not (a healthy stream is
+   * long-lived) — bound the wait with the builder's own `.timeout(ms)`.
+   */
+  sse(path: string): SseBuilder
   /**
    * Resolve the effective header set for a request: factory headers merged with
    * `overrides`, with all callables invoked and awaited. Case-insensitive on
@@ -398,6 +408,9 @@ export function createClient(opts: ClientOptions): Client {
     },
     delete(path) {
       return createRequestBuilder(client, 'DELETE', path)
+    },
+    sse(path) {
+      return createSseBuilder(client, path)
     },
 
     resolveHeaders(overrides) {

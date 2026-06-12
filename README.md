@@ -513,6 +513,45 @@ interface ApiResponse<T> {
 }
 ```
 
+### Server-sent events (SSE)
+
+`client.sse(path)` opens a `text/event-stream` request and returns a fluent,
+awaitable builder that collects parsed events until a condition is met
+(default: the first event), then **cancels the stream** — a test never holds a
+connection open past its assertion. Factory headers, the cookie jar, and
+`beforeRequest` signing apply to the stream request like any other; works on
+Bun and Node alike.
+
+```ts
+const capture = await client
+  .sse('/v1/stream')
+  .lastEventId('0')                    // resume cursor (Last-Event-ID header)
+  .expectStatus(200)                   // open-time assertion (fails fast)
+  .until((events) => events.some((e) => e.data.includes('"id":42')))
+  .timeout(5000)                       // wait budget for the condition
+
+capture.events // [{ id?, event, data }] — multi-line data joined per the spec
+```
+
+| Method | Effect |
+|---|---|
+| `.query(record)` / `.headers(record)` | As on the request builder. |
+| `.lastEventId(id)` | Set the `Last-Event-ID` header (the SSE resume cursor). |
+| `.until(predicate)` | Collect events until `predicate(events)` is true (default: first event). |
+| `.take(n)` | Sugar for "until `n` events". |
+| `.timeout(ms)` | Wait budget for the condition (default 10s; `0` disables). Unmet ⇒ `AssertionError`. |
+| `.onOpen(fn)` | Runs once the stream is open, before reading — trigger the event you are waiting for without racing the subscription. |
+| `.expectStatus(code)` / `.expectHeader(name, value)` | Open-time assertions on the stream response. |
+| `.send()` | Open + capture (same as `await`). |
+
+Lifecycle rules: a response that is **not** an event stream fails loudly unless
+you queued an expectation for it (so `.sse('/v1/stream').expectStatus(401)` is
+a clean auth check that resolves with zero events); a stream that **closes**
+before the condition is met fails and names how many events arrived; the
+client's request `timeoutMs` does not apply to streams (the builder's
+`.timeout(ms)` is the budget). Comment lines / heartbeats (`: …`) and dataless
+blocks never surface as events.
+
 ### Schema & latency assertions
 
 `.expectSchema(schema)` validates the body against a **Standard Schema** —

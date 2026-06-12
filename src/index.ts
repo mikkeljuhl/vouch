@@ -21,6 +21,8 @@ export type {
 } from './client.js'
 export { computeRetryDelay, parseRetryAfter, formatDebugDump } from './builder.js'
 export type { RequestBuilder, ApiResponse } from './builder.js'
+export { createSseParser, DEFAULT_SSE_TIMEOUT_MS } from './sse.js'
+export type { SseBuilder, SseCapture, SseEvent } from './sse.js'
 export { AssertionError } from './assert.js'
 export type { AssertContext, SchemaInput, StandardSchemaV1 } from './assert.js'
 export { fixture } from './fixtures.js'
